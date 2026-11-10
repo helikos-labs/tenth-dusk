@@ -55,7 +55,7 @@ A single-player 3D hex adventure for phones, played in portrait with one thumb. 
 - **Region map:** each book has a hand-shaped skeleton with its ranges, lakes, deserts, coast, the zones, the gates between them, hearths, the port and story landmarks. Hex detail inside each zone is generated from a seed (§14).
 - **Zone edges:** every hex outside the zone is either impassable terrain (peaks, lake, sea, dune sea, chasm) or behind a closed **gate**. The world beyond the zone shows as walls fading into the Hush. There is no visible map edge and no island unless the book has a coast.
 - **Coordinates:** the rules use offset coordinates `(row, col)` with odd rows shifted right, and row numbers rising forward (up the screen). The renderer converts to axial coordinates centred on the zone.
-- **Camera:** portrait, following the hero, about 9 hexes across at the default zoom. Pinch zooms between 0.7× and 2×.
+- **Camera:** portrait, following the hero, about 8 hexes across at the default zoom. Pinch zooms between 0.7× and 2×.
 
 ### 4.1 Book I: The Saltreach (the launch book)
 

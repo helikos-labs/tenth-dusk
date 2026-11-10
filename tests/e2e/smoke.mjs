@@ -2,7 +2,8 @@
 // 390 × 844 in Chromium on SwiftShader, waits for window.__worldReady (exposed with ?test=1, R4 and R6), and fails on
 // any console error or page error, or when the canvas's centre 50 × 50 pixels are all one colour. Saves
 // tests/e2e/out/world.png. Then checks the default zoom (the hero's hex is at least 44 CSS px wide and tall, §1 S4),
-// taps a hex 2 away twice (a preview, then a walk) and checks that the hero moved and the steps left dropped; with a
+// taps reachable hexes (flat and sloped) and the start's waystone for real (pointer clicks), checking the hex each
+// names, taps a hex 2 away twice (a preview, then a walk) and checks that the hero moved and the steps left dropped; with a
 // new preview showing where the steps left allow one, saves tests/e2e/out/walk.png (and the first preview,
 // preview.png). Run after `npm run build`: node tests/e2e/smoke.mjs
 // Requires Playwright with Chromium installed outside the app (not a dependency of it): `require('playwright')` must
@@ -110,6 +111,40 @@ try {
   }, at)
   console.log(`hero's hex at the default zoom: ${hex.width.toFixed(1)} × ${hex.height.toFixed(1)} CSS px`)
   if (Math.min(hex.width, hex.height) < 44) fail(`a hex is under 44 px at the default zoom (${hex.width.toFixed(1)} × ${hex.height.toFixed(1)})`)
+
+  // Real taps (a pointer click on the canvas, through the raycast and the warp): on the centre of a reachable hex, the
+  // preview ends there; on the hilliest reachable hex likewise; on the start's waystone, a Landmark taller than its
+  // hex is deep at this pitch, the tap names the waystone's hex, not the ground behind it.
+  const click = async (o, dy = 0) => {
+    const [x, y] = await page.evaluate(({ o, dy }) => window.__project(o.row, o.col, 0, 0, dy), { o, dy })
+    await page.mouse.click(x, y)
+    await page.waitForTimeout(400)
+  }
+  const reach = await page.evaluate(() =>
+    window.__reach.map((k) => {
+      const c = window.__run.zone.cells.get(k)
+      return { row: c.row, col: c.col, level: c.level, terrain: c.terrain }
+    }),
+  )
+  const flat = reach.find((c) => c.level === 0) ?? reach[0]
+  const hill = [...reach].sort((a, b) => b.level - a.level)[0]
+  for (const [what, o] of [['flat', flat], ['sloped', hill]]) {
+    await click(o)
+    const end = await page.evaluate(() => window.__preview?.at(-1) ?? null)
+    const ok = end && end.row === o.row && end.col === o.col
+    console.log(`real tap on ${what} hex ${o.row},${o.col} (${o.terrain}, level ${o.level}): preview ends at ${end ? `${end.row},${end.col}` : 'nothing'}`)
+    if (!ok) fail(`a real tap on ${o.row},${o.col} did not preview a path to it`)
+  }
+  // (The waystone is too short for the ground behind its top to lie in another hex, so the check is that the
+  // Landmark itself was hit, which is what keeps a tall one from naming the hex behind it.)
+  await click(at, 1.0)
+  const named = await page.evaluate(() => window.__lastTap)
+  console.log(`real tap on the start waystone (1.0 above ${at.row},${at.col}): named ${named.row},${named.col} by the ${named.via}`)
+  if (named.row !== at.row || named.col !== at.col || named.via !== 'landmark') {
+    fail(`a tap on the waystone at ${at.row},${at.col} named ${named.row},${named.col} by the ${named.via}`)
+  }
+  // The hero's own hex is not reachable: the preview is cleared.
+  if (await page.evaluate(() => window.__preview)) fail('a tap on the hero’s own hex left a preview')
 
   // Tap a hex 2 away (the first that previews a path), then tap it again: the hero walks there.
   const cube = ({ row, col }) => {

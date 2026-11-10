@@ -15,7 +15,7 @@
 import { Canvas, useFrame, useThree } from '@react-three/fiber'
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import * as THREE from 'three'
-import { toAxial, toOffset, type Off } from '../rules/hex.ts'
+import { distance, toAxial, toOffset, type Off } from '../rules/hex.ts'
 import type { RunState } from '../rules/run.ts'
 import type { LandmarkKind } from '../rules/zone.ts'
 import { TEST, hooks } from '../testHooks.ts'
@@ -291,7 +291,7 @@ function Scene({ world, client, run, preview, onTap }: SceneProps) {
         mist,
         tube,
         // Every model kind as built, and dimmed as remembered (the Landmarks).
-        ...modelKeys.map((k) => (k === HERO_KEY ? dressHero(copyModel(k)) : copyModel(k))),
+        ...modelKeys.map((k) => (k === HERO_KEY ? lightsOff(dressHero(copyModel(k))) : copyModel(k))),
         ...modelKeys.filter((k) => k !== HERO_KEY).map((k) => {
           const c = copyModel(k)
           dimLandmark(c, true)
@@ -312,6 +312,13 @@ function Scene({ world, client, run, preview, onTap }: SceneProps) {
     }
   }, [gl, camera, scene, materials, plants, roadMaterials, mist, modelKeys])
   const shown = !!terrain && compiled
+  // The hero shows with the world. Its light stays on from the start (a hidden parent would hide it from the light
+  // set, and every program would recompile when it came back): only its meshes and halo hide.
+  useLayoutEffect(() => {
+    hero.traverse((o) => {
+      if ((o as THREE.Mesh).isMesh || (o as THREE.Sprite).isSprite) o.visible = shown
+    })
+  }, [hero, shown])
   useLayoutEffect(() => {
     if (!shown) return
     shadows.current = true
@@ -343,19 +350,20 @@ function Scene({ world, client, run, preview, onTap }: SceneProps) {
     const to = spotOf(run.at)
     const was = lastAt.current
     lastAt.current = run.at
-    if (!was || Math.abs(was.row - run.at.row) > 1 || Math.abs(was.col - run.at.col) > 1) {
+    if (!was || distance(was, run.at) > 1) {
       walk.current = null
       hero.position.copy(to)
       if (!was) hero.rotation.y = 0.4
       return
     }
-    if (was.row === run.at.row && was.col === run.at.col) return
+    if (distance(was, run.at) === 0) return
     walk.current = { from: hero.position.clone(), to, t: 0 }
     hero.rotation.y = Math.atan2(to.x - hero.position.x, to.z - hero.position.z)
   }, [run.at, spotOf, hero])
 
   const zoom = useRef(1)
   const focus = useRef<THREE.Vector3 | null>(null)
+  const target = useMemo(() => new THREE.Vector3(), [])
   const drawn = useRef(0)
   useFrame((state, dt) => {
     const t = state.clock.elapsedTime
@@ -371,9 +379,9 @@ function Scene({ world, client, run, preview, onTap }: SceneProps) {
     hero.userData.moving = !!walk.current
     for (const tick of ticksOf(hero)) tick(t, dt)
     // The camera eases after the hero (its middle), with a half-life of CAMERA.halfLife.
-    const target = hero.position.clone()
+    target.copy(hero.position)
     target.y += (HERO_HEIGHT * SCALE.hero) / 2
-    if (!focus.current) focus.current = target
+    if (!focus.current) focus.current = target.clone()
     else focus.current.lerp(target, 1 - Math.pow(2, -dt / CAMERA.halfLife))
     follow(camera, scene, focus.current, state.size, zoom.current)
     // The first frame with the world in it, then the next: the world has been drawn (R4).
@@ -383,6 +391,8 @@ function Scene({ world, client, run, preview, onTap }: SceneProps) {
   // Taps and pinches on the canvas. A tap raycasts to the ground, finds the province under the point through the warp
   // (`hexAt(warp(point))`) and reports its hex; two fingers pinch the zoom (the wheel too, on a desktop).
   const terrainMesh = useRef<THREE.Mesh>(null)
+  /** The Landmark copies the scene shows, each with its hex: a tap on one names its hex, not the ground behind it. */
+  const picks = useMemo(() => new Map<THREE.Object3D, Off>(), [])
   const tapRef = useRef(onTap)
   useLayoutEffect(() => {
     tapRef.current = onTap
@@ -403,10 +413,22 @@ function Scene({ world, client, run, preview, onTap }: SceneProps) {
       if (!mesh) return
       const r = el.getBoundingClientRect()
       ray.setFromCamera(new THREE.Vector2(((x - r.left) / r.width) * 2 - 1, -((y - r.top) / r.height) * 2 + 1), camera)
-      const hit = ray.intersectObject(mesh, false)[0]
-      if (!hit) return
-      const w = field.warp(hit.point.x, hit.point.z)
-      tapRef.current(toOffset(hexAt(w.x, w.z)))
+      const ground = ray.intersectObject(mesh, false)[0]
+      // A Landmark in front of the ground there (one that shows; its solid parts, not a fire's halo) names its hex.
+      const shownLandmarks = [...picks.keys()].filter((o) => o.visible)
+      const mark = ray.intersectObjects(shownLandmarks, true).find((h) => (h.object as THREE.Mesh).isMesh)
+      if (mark && (!ground || mark.distance < ground.distance)) {
+        let o: THREE.Object3D | null = mark.object
+        while (o && !picks.has(o)) o = o.parent
+        if (o) return report(picks.get(o)!, 'landmark')
+      }
+      if (!ground) return
+      const w = field.warp(ground.point.x, ground.point.z)
+      report(toOffset(hexAt(w.x, w.z)), 'ground')
+    }
+    const report = (o: Off, via: 'landmark' | 'ground') => {
+      if (TEST) hooks.__lastTap = { ...o, via }
+      tapRef.current(o)
     }
     const onDown = (e: PointerEvent) => {
       down.set(e.pointerId, { x: e.clientX, y: e.clientY, x0: e.clientX, y0: e.clientY, t0: performance.now() })
@@ -446,23 +468,25 @@ function Scene({ world, client, run, preview, onTap }: SceneProps) {
       el.removeEventListener('pointercancel', onUp)
       el.removeEventListener('wheel', onWheel)
     }
-  }, [gl, camera, field])
+  }, [gl, camera, field, picks])
 
-  // Test hooks (?test=1, R6): tap a hex, read the run, the preview and the hero's place, and project a point at the
-  // height of a hex's centre (offset dx, dz from it) to the screen (CSS px) to measure hexes there.
+  // Test hooks (?test=1, R6): tap a hex, read the run, the preview, the reachable hexes, the hex the last real tap
+  // named and whether a Landmark or the ground named it (`__lastTap`), and the hero's place, and project a point at the height of a hex's centre (offset dx, dz from
+  // it, dy above it) to the screen (CSS px), to measure hexes there or tap them.
   useLayoutEffect(() => {
     if (!TEST) return
     hooks.__run = run
     hooks.__preview = preview
-  }, [run, preview])
+    hooks.__reach = [...reach]
+  }, [run, preview, reach])
   useEffect(() => {
     if (!TEST) return
     hooks.__tap = (row: number, col: number) => tapRef.current({ row, col })
     hooks.__heroAt = () => hero.position.toArray()
-    hooks.__project = (row: number, col: number, dx = 0, dz = 0) => {
+    hooks.__project = (row: number, col: number, dx = 0, dz = 0, dy = 0) => {
       const { q, r } = toAxial({ row, col })
       const c = hexCenter(q, r)
-      const v = new THREE.Vector3(c.x + dx, ground(c.x, c.z), c.z + dz).project(camera)
+      const v = new THREE.Vector3(c.x + dx, ground(c.x, c.z) + dy, c.z + dz).project(camera)
       return [((v.x + 1) / 2) * size.width, ((1 - v.y) / 2) * size.height]
     }
   }, [hero, ground, camera, size])
@@ -488,7 +512,7 @@ function Scene({ world, client, run, preview, onTap }: SceneProps) {
         <primitive object={plants.group} dispose={null} />
         <primitive object={roads} dispose={null} />
         {landmarks.map((l) => (
-          <Landmark key={l.key} kind={l.kind} lit={run.lit.includes(l.key)} at={l.at} fog={run.fog.get(l.key) ?? 0} />
+          <Landmark key={l.key} hex={l.key} kind={l.kind} lit={run.lit.includes(l.key)} at={l.at} fog={run.fog.get(l.key) ?? 0} picks={picks} />
         ))}
         {tube && <mesh geometry={tube} material={materials.tube} />}
         {terrain && <primitive object={mist} dispose={null} />}
@@ -502,9 +526,17 @@ function Scene({ world, client, run, preview, onTap }: SceneProps) {
  * A Landmark: a copy of its kind, shown once its hex has been seen (§15.4), dimmed while only remembered (§5.2), and
  * ticking (a fire's flicker) while it shows.
  */
-function Landmark({ kind, lit, at, fog }: { kind: LandmarkKind; lit: boolean; at: THREE.Vector3; fog: number }) {
+function Landmark(props: { hex: string; kind: LandmarkKind; lit: boolean; at: THREE.Vector3; fog: number; picks: Map<THREE.Object3D, Off> }) {
+  const { hex, kind, lit, at, fog, picks } = props
   const model = useMemo(() => copyModel(landmarkKey(kind, kind === 'beacon' && lit)), [kind, lit])
   const shown = fog >= 2
+  useLayoutEffect(() => {
+    const [row, col] = hex.split(',').map(Number)
+    picks.set(model, { row, col })
+    return () => {
+      picks.delete(model)
+    }
+  }, [picks, model, hex])
   useLayoutEffect(() => dimLandmark(model, fog === 2), [model, fog])
   useFrame((state, dt) => {
     if (!shown) return
@@ -623,6 +655,14 @@ function standIn(material: THREE.Material, extra: string[]): THREE.Mesh {
   m.castShadow = true
   m.receiveShadow = true
   return m
+}
+/** A stand-in with its own lights off: compiling gathers the lights of the scene and of the stand-in, and the scene
+ * already holds the hero's lantern. */
+const lightsOff = (o: THREE.Object3D) => {
+  o.traverse((c) => {
+    if ((c as THREE.Light).isLight) c.visible = false
+  })
+  return o
 }
 const noShadows = (m: THREE.Mesh) => {
   m.castShadow = m.receiveShadow = false
