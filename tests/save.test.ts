@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { move, newRun, canMove } from '../src/rules/run.ts'
+import { move, newRun, canMove, pressOn } from '../src/rules/run.ts'
 import type { RunState } from '../src/rules/run.ts'
 import { neighbours } from '../src/rules/hex.ts'
 import { generateZone } from '../src/rules/gen.ts'
@@ -37,3 +37,28 @@ test('a saved position outside the zone, or an unknown chapter, is corrupt', () 
   assert.deepEqual(edit((r) => { r.status = 'dead' }), { ok: false, reason: 'corrupt' })
 })
 test('the save key names version 1', () => assert.equal(SAVE_KEY, 'tenth-dusk.save.v1'))
+
+const roundTrip = (s: RunState) => {
+  const r = load(serialise(s)); assert.ok(r.ok); assert.deepEqual(stripZone(r.run), stripZone(s))
+}
+test('mid-night and finished runs round-trip', () => {
+  const base = newRun(generateZone(CHAPTER1, 'REACH1'), 'Wren')
+  const night = pressOn({ ...base, steps: 0 })
+  assert.equal(night.night, true); assert.ok(night.nightSteps > 0); roundTrip(night)
+  roundTrip({ ...base, status: 'expired', scars: ['b1c1'], events: [{ kind: 'expired', at: base.at, day: 10 }] })
+  roundTrip({ ...base, status: 'hearth', events: [{ kind: 'hearth', at: base.at, day: 3 }] })
+})
+test('range, lastCamp and fog-key guards refuse bad saves', () => {
+  const s = newRun(generateZone(CHAPTER1, 'REACH1'), 'Wren')
+  const bad = (f: (run: Record<string, any>) => void) => {
+    const file = JSON.parse(serialise(s)); f(file.run); return load(JSON.stringify(file))
+  }
+  const corrupt = { ok: false, reason: 'corrupt' }
+  assert.deepEqual(bad((r) => { r.lastCamp = { row: 9999, col: 0 } }), corrupt)
+  assert.deepEqual(bad((r) => { r.fog = [['garbage', 3]] }), corrupt)
+  assert.deepEqual(bad((r) => { r.fog = [['9999,0', 3]] }), corrupt)
+  assert.deepEqual(bad((r) => { r.steps = null }), corrupt)
+  assert.deepEqual(bad((r) => { r.steps = -1 }), corrupt)
+  assert.deepEqual(bad((r) => { r.day = 0 }), corrupt)
+  assert.deepEqual(bad((r) => { r.hero.vigour = 1.5 }), corrupt)
+})

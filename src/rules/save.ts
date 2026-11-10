@@ -32,6 +32,7 @@ type Rec = Record<string, unknown>
 const isRec = (x: unknown): x is Rec => typeof x === 'object' && x !== null && !Array.isArray(x)
 const num = (x: unknown): x is number => typeof x === 'number' && Number.isFinite(x)
 const int = (x: unknown): x is number => Number.isInteger(x)
+const nat = (x: unknown): x is number => Number.isInteger(x) && (x as number) >= 0
 const str = (x: unknown): x is string => typeof x === 'string'
 const strs = (x: unknown): x is string[] => Array.isArray(x) && x.every(str)
 const off = (x: unknown): x is Off => isRec(x) && int(x.row) && int(x.col)
@@ -42,23 +43,23 @@ const SLOTS = ['weapon', 'shield', 'lantern', 'cloak', 'boots', 'charm']
 
 function validHero(h: unknown): h is Hero {
   if (!isRec(h)) return false
-  if (!str(h.name) || !num(h.vigour) || !num(h.maxVigour) || !num(h.ember) || !num(h.maxEmber)) return false
+  if (!str(h.name) || !nat(h.vigour) || !nat(h.maxVigour) || !nat(h.ember) || !nat(h.maxEmber)) return false
   if (!isRec(h.gear)) return false
   for (const [slot, g] of Object.entries(h.gear)) {
     if (!SLOTS.includes(slot) || !isRec(g) || !str(g.id) || ![1, 2, 3, 4].includes(g.tier as number)) return false
   }
-  return Array.isArray(h.satchel) && h.satchel.every((i) => isRec(i) && str(i.id) && num(i.n))
+  return Array.isArray(h.satchel) && h.satchel.every((i) => isRec(i) && str(i.id) && nat(i.n))
 }
 
 const validEvent = (e: unknown): e is RunEvent =>
-  isRec(e) && str(e.kind) && EVENT_KINDS.includes(e.kind) && off(e.at) && num(e.day)
+  isRec(e) && str(e.kind) && EVENT_KINDS.includes(e.kind) && off(e.at) && int(e.day)
 
 function revive(raw: unknown): RunState | null {
   if (!isRec(raw)) return null
   const z = raw.zone
   if (!isRec(z) || !str(z.chapter) || !str(z.seed)) return null
   if (!Object.hasOwn(CHAPTERS, z.chapter)) return null
-  if (!num(raw.day) || !num(raw.steps) || !num(raw.nightSteps) || !num(raw.furthestRow) || !num(raw.sunkBelow) || !num(raw.rng)) return null
+  if (!int(raw.day) || raw.day < 1 || !nat(raw.steps) || !nat(raw.nightSteps) || !int(raw.furthestRow) || !int(raw.sunkBelow) || !num(raw.rng)) return null
   if (typeof raw.night !== 'boolean') return null
   if (!off(raw.at) || !off(raw.lastCamp)) return null
   if (!str(raw.status) || !STATUSES.includes(raw.status)) return null
@@ -69,6 +70,7 @@ function revive(raw: unknown): RunState | null {
   const fog = new Map<string, Fog>()
   for (const e of raw.fog) {
     if (!Array.isArray(e) || e.length !== 2 || !str(e[0]) || ![0, 1, 2, 3].includes(e[1])) return null
+    if (!/^-?\d+,-?\d+$/.test(e[0])) return null
     fog.set(e[0], e[1] as Fog)
   }
   let zone
@@ -77,7 +79,8 @@ function revive(raw: unknown): RunState | null {
   } catch {
     return null
   }
-  if (!cellAt(zone, raw.at)) return null
+  if (!cellAt(zone, raw.at) || !cellAt(zone, raw.lastCamp)) return null
+  for (const k of fog.keys()) if (!zone.cells.has(k)) return null
   return { ...(raw as unknown as RunState), zone, fog }
 }
 
