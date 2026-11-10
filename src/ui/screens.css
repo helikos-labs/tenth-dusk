@@ -663,6 +663,24 @@
   color: var(--td-ember);
 }
 
+/* "Restoring the world…" while a lost WebGL context comes back (App.tsx, R25). */
+.td-restoring {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+}
+.td-restoring span {
+  padding: 9px 16px;
+  border-radius: 999px;
+  background: rgba(12, 15, 21, 0.9);
+  border: 1px solid rgba(255, 154, 74, 0.55);
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  animation: td-fade-in 0.4s ease-out both;
+}
+
 /* Upright: a phone held sideways (wider than tall, under 1000 px wide). */
 .td-upright {
   display: none;

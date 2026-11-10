@@ -36,6 +36,7 @@ export type GameAction =
   | { t: 'camp'; actions: NightAction[] }
   | { t: 'pack' | 'closePack' }
   | { t: 'continue' }
+  | { t: 'title' }
 
 export interface Game {
   run: RunState | null
@@ -225,6 +226,9 @@ function apply(s: State, a: Internal): State {
       }
       if (s.screen === 'end') return { ...s, screen: 'title', run: null, saved: null, preview: null, walk: null, blocked: null, notice: null, seen: 0 }
       return s
+    case 'title':
+      // Back to the title from any screen (the WebGL 2 notice, R25), the run kept as the save to continue.
+      return { ...s, screen: 'title', run: null, saved: s.run ?? s.saved, preview: null, walk: null, blocked: null, notice: null, seen: 0 }
     case 'tap':
       return tap(s, a.at)
     case 'step':

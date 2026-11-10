@@ -14,7 +14,10 @@
 //   7. at 360 × 640 the HUD's top bar, tracker and bottom bar don't overlap; at 844 × 390, "Turn your phone upright";
 //   8. corrupt text under the save key and a reload: "Start a new journey" shows and the text is set aside under
 //      `…corrupt`.
-// Fails on any console error or page error. Saves a picture of each screen at 390 × 844 and at 360 × 640 in
+// Then, once: without WebGL 2 (getContext('webgl2') made to return null) the title shows and a new journey shows "This
+// journey needs WebGL 2" instead of the world, with "Return to title"; and when only the world's own WebGL 2 context
+// fails, the error boundary's "The way grows dark" shows, with "Return to title" back to a title that can continue (R25).
+// Fails on any console error or page error (except React's report of the error the boundary catches). Saves a picture of each screen at 390 × 844 and at 360 × 640 in
 // tests/e2e/out/ (flow-<size>-<screen>.png), for the first seed; the night HUD and both chapter ends come from the save,
 // edited. Run after `npm run build`: node tests/e2e/flow.mjs [SEED ...]
 // Requires Playwright with Chromium installed outside the app, as smoke.mjs does.
@@ -214,6 +217,57 @@ async function pushed(page, size) {
   await page.reload()
 }
 
+/** Without WebGL 2: the notice in place of the world. With the world's own context failing: the error boundary. */
+async function failures(browser) {
+  // getContext('webgl2') returns null: from the first call (no WebGL 2), or after the first (the app's probe passes,
+  // the world's own context fails).
+  const noWebGL2 = (after) => {
+    const orig = HTMLCanvasElement.prototype.getContext
+    let calls = 0
+    HTMLCanvasElement.prototype.getContext = function (type, ...rest) {
+      if (type === 'webgl2' && calls++ >= after) return null
+      return orig.call(this, type, ...rest)
+    }
+  }
+  {
+    const context = await newContext(browser)
+    await context.addInitScript(noWebGL2, 0)
+    const page = await context.newPage()
+    await page.goto(`${BASE}&seed=${SEEDS[0]}`)
+    await page.evaluate(() => localStorage.clear())
+    await page.reload()
+    await expectText(page, 'Tenth Dusk', 'title without WebGL 2')
+    await press(page, 'Start a new journey')
+    await press(page, 'Take up the lantern')
+    await expectText(page, 'This journey needs WebGL 2', 'notice without WebGL 2')
+    if (await page.locator('canvas').count()) fail('a canvas was mounted without WebGL 2')
+    await shot(page, '390x844', 'no-webgl2')
+    await press(page, 'Return to title')
+    await expectText(page, 'Continue', 'title after the WebGL 2 notice')
+    await context.close()
+  }
+  {
+    // React reports the error the boundary catches on the console: only page errors fail here.
+    const context = await browser.newContext({ viewport: { width: 390, height: 844 } })
+    context.on('weberror', (e) => fail(`page error: ${e.error().message}`))
+    await context.addInitScript(noWebGL2, 1)
+    const page = await context.newPage()
+    await page.goto(`${BASE}&seed=${SEEDS[0]}`)
+    await page.evaluate(() => localStorage.clear())
+    await page.reload()
+    await press(page, 'Start a new journey')
+    await press(page, 'Take up the lantern')
+    await expectText(page, 'The way grows dark', 'error boundary when the world cannot get WebGL 2')
+    await shot(page, '390x844', 'error')
+    await press(page, 'Return to title')
+    await expectText(page, 'Continue', 'title after the error screen')
+    const kept = await save(page)
+    if (kept && JSON.parse(kept).run) pass('the save is kept through the error screen')
+    else fail('the save was lost through the error screen')
+    await context.close()
+  }
+}
+
 /** A new journey without `&seed=`: its seed is fresh, 6 capitals and digits. */
 async function freshSeed(browser) {
   const context = await newContext(browser)
@@ -411,6 +465,7 @@ try {
   await waitForServer(`http://localhost:${PORT}/`, 30_000)
   browser = await chromium.launch({ args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist'] })
   await freshSeed(browser)
+  await failures(browser)
   for (const seed of SEEDS) {
     console.log(`--- seed ${seed}`)
     await flow(browser, seed)

@@ -47,6 +47,7 @@ import { ROAD, buildRoads } from '../world/roads.ts'
 import { hexIndex, writeCells } from '../world/terrainMesh.ts'
 import { SMALL_SCREEN, useWorld, useWorldClient } from '../world/useWorld.ts'
 import type { WorldClient } from '../world/worldClient.ts'
+import ContextWatch from './ContextWatch.tsx'
 import { HERO_HEIGHT, dressHero, makeHero } from './models/hero.ts'
 import { dimLandmark, makeLandmark } from './models/landmarks.ts'
 import { reachable } from './reach.ts'
@@ -63,9 +64,13 @@ export interface WorldSceneProps {
   detail: number
   /**
    * Called once the world has been drawn (when `window.__worldReady` is set, R4), with when this view mounted and
-   * began to build it (performance.now() ms), for the performance overlay.
+   * began to build it (performance.now() ms): for the performance overlay, and to end "Restoring the world…".
    */
   onReady?: (startedAt: number) => void
+  /** The WebGL context was lost (ContextWatch.tsx). */
+  onLost?: () => void
+  /** The lost context is back: remount the scene to rebuild it (§16). */
+  onRestored?: () => void
 }
 
 /** The Hush beyond the walls: the fog's colour and the sky's. */
@@ -123,7 +128,7 @@ function prepareModels() {
   return kinds.map(([key]) => key)
 }
 
-export default function WorldScene({ run, world, preview, onTap, detail, onReady }: WorldSceneProps) {
+export default function WorldScene({ run, world, preview, onTap, detail, onReady, onLost, onRestored }: WorldSceneProps) {
   // The world worker gets the board at once, so the first build runs while the canvas is set up.
   const client = useWorldClient(world, detail)
   const [startedAt] = useState(() => performance.now())
@@ -143,6 +148,7 @@ export default function WorldScene({ run, world, preview, onTap, detail, onReady
       >
         <Scene world={world} client={client} run={run} preview={preview} onTap={onTap} onReady={onReady && (() => onReady(startedAt))} />
         {SMALL_SCREEN && <Throttle fps={IDLE_FPS} />}
+        <ContextWatch onLost={onLost} onRestored={onRestored} />
       </Canvas>
     </div>
   )

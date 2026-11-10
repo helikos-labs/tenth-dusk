@@ -6,7 +6,9 @@
 // taps reachable hexes (flat and sloped) and the start's waystone for real (pointer clicks), checking the hex each
 // names, taps a hex 2 away twice (a preview, then a walk) and checks that the hero moved and the steps left dropped; with a
 // new preview showing where the steps left allow one, saves tests/e2e/out/walk.png (and the first preview,
-// preview.png). Run after `npm run build`: node tests/e2e/smoke.mjs
+// preview.png). Last, loses the WebGL context (window.__loseContext, WEBGL_lose_context, §16 and R25): "Restoring the
+// world…" shows, then a new canvas draws the world again (__worldReady, the centre check) with the hero where they
+// stood; saves tests/e2e/out/restored.png. Run after `npm run build`: node tests/e2e/smoke.mjs
 // Requires Playwright with Chromium installed outside the app (not a dependency of it): `require('playwright')` must
 // resolve, as it does in the cloud sessions' environment (NODE_PATH points at the pre-installed copy).
 import { spawn } from 'node:child_process'
@@ -80,24 +82,27 @@ try {
   console.log(`world ready in ${((Date.now() - t0) / 1000).toFixed(1)} s`)
 
   // The canvas's centre 50 × 50 pixels, as the screen shows them, read back through a 2D canvas.
-  const box = await page.locator('canvas').boundingBox()
-  if (!box) throw new Error('no canvas')
-  const clip = { x: Math.round(box.x + box.width / 2 - 25), y: Math.round(box.y + box.height / 2 - 25), width: 50, height: 50 }
-  const centre = (await page.screenshot({ clip })).toString('base64')
-  const colours = await page.evaluate(async (png) => {
-    const img = new Image()
-    img.src = `data:image/png;base64,${png}`
-    await img.decode()
-    const c = document.createElement('canvas')
-    c.width = img.width
-    c.height = img.height
-    const g = c.getContext('2d')
-    g.drawImage(img, 0, 0)
-    const d = g.getImageData(0, 0, c.width, c.height).data
-    const seen = new Set()
-    for (let i = 0; i < d.length; i += 4) seen.add((d[i] << 16) | (d[i + 1] << 8) | d[i + 2])
-    return seen.size
-  }, centre)
+  const centreColours = async () => {
+    const box = await page.locator('canvas').boundingBox()
+    if (!box) throw new Error('no canvas')
+    const clip = { x: Math.round(box.x + box.width / 2 - 25), y: Math.round(box.y + box.height / 2 - 25), width: 50, height: 50 }
+    const centre = (await page.screenshot({ clip })).toString('base64')
+    return page.evaluate(async (png) => {
+      const img = new Image()
+      img.src = `data:image/png;base64,${png}`
+      await img.decode()
+      const c = document.createElement('canvas')
+      c.width = img.width
+      c.height = img.height
+      const g = c.getContext('2d')
+      g.drawImage(img, 0, 0)
+      const d = g.getImageData(0, 0, c.width, c.height).data
+      const seen = new Set()
+      for (let i = 0; i < d.length; i += 4) seen.add((d[i] << 16) | (d[i + 1] << 8) | d[i + 2])
+      return seen.size
+    }, centre)
+  }
+  const colours = await centreColours()
   console.log(`${colours} colours in the canvas's centre 50 × 50`)
   if (colours <= 1) fail('the canvas centre is one colour: nothing drawn')
 
@@ -191,6 +196,32 @@ try {
   await page.waitForTimeout(800)
   await page.screenshot({ path: join(OUT, 'walk.png') })
   console.log(`saved ${join(OUT, 'walk.png')}`)
+
+  // A lost WebGL context: "Restoring the world…", then the scene remounts on a new canvas and draws the world again.
+  const stood = await page.evaluate(() => window.__run.at)
+  const lost = await page.evaluate(() => {
+    window.__lostCanvas = document.querySelector('canvas')
+    return window.__loseContext()
+  })
+  if (!lost) throw new Error('no WEBGL_lose_context to lose the context with')
+  const restoring = page.getByText('Restoring the world…', { exact: true })
+  if (await restoring.waitFor({ state: 'visible', timeout: 10_000 }).then(() => true, () => false)) console.log('context lost: "Restoring the world…" shows')
+  else fail('a lost context does not show "Restoring the world…"')
+  await page.waitForFunction(() => window.__worldReady === true, null, { timeout: READY_MS, polling: 250 })
+  await page.waitForTimeout(1500)
+  const remounted = await page.evaluate(() => {
+    const c = document.querySelector('canvas')
+    return !!c && c !== window.__lostCanvas && !window.__lostCanvas.isConnected
+  })
+  const back = await centreColours()
+  const at2 = await page.evaluate(() => window.__run.at)
+  console.log(`context restored: a new canvas ${remounted}, ${back} colours in its centre, the hero at ${at2.row},${at2.col}`)
+  if (!remounted) fail('the scene did not remount on a new canvas after the context came back')
+  if (back <= 1) fail('the restored canvas centre is one colour: nothing drawn')
+  if (at2.row !== stood.row || at2.col !== stood.col) fail(`the hero moved from ${stood.row},${stood.col} to ${at2.row},${at2.col} over the context loss`)
+  if (await restoring.isVisible()) fail('"Restoring the world…" stays after the world is back')
+  await page.screenshot({ path: join(OUT, 'restored.png') })
+  console.log(`saved ${join(OUT, 'restored.png')}`)
   code = errors.length ? 1 : 0
 } catch (e) {
   fail(String(e?.stack ?? e))
