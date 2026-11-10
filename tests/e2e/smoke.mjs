@@ -1,6 +1,7 @@
 // Smoke test (§17): the built app renders the zone's world at phone size. Serves dist/ with `vite preview`, opens it at
-// 390 × 844 in Chromium on SwiftShader, waits for window.__worldReady (exposed with ?test=1, R4 and R6), and fails on
-// any console error or page error, or when the canvas's centre 50 × 50 pixels are all one colour. Saves
+// 390 × 844 in Chromium on SwiftShader, starts a new journey (title, name, intro), waits for window.__worldReady
+// (exposed with ?test=1, R4 and R6), and fails on any console error or page error, or when the canvas's centre
+// 50 × 50 pixels are all one colour. Saves
 // tests/e2e/out/world.png. Then checks the default zoom (the hero's hex is at least 44 CSS px wide and tall, §1 S4),
 // taps reachable hexes (flat and sloped) and the start's waystone for real (pointer clicks), checking the hex each
 // names, taps a hex 2 away twice (a preview, then a walk) and checks that the hero moved and the steps left dropped; with a
@@ -20,7 +21,8 @@ const { chromium } = require('playwright')
 const APP = join(dirname(fileURLToPath(import.meta.url)), '..', '..')
 const OUT = join(APP, 'tests', 'e2e', 'out')
 const PORT = 4179
-const URL = `http://localhost:${PORT}/?test=1`
+// A known zone: chapter 1 for seed REACH1 (a new journey's seed is fresh each time without `seed`).
+const URL = `http://localhost:${PORT}/?test=1&seed=REACH1`
 /** WebGL on SwiftShader is slow: the world can take a while to build and draw. */
 const READY_MS = 180_000
 
@@ -70,6 +72,8 @@ try {
   page.on('pageerror', (e) => fail(`page error: ${e.message}`))
   const t0 = Date.now()
   await page.goto(URL)
+  // A new journey (a fresh browser has no save): the title, the hero's default name, the chapter intro.
+  for (const name of ['Start a new journey', 'Take up the lantern', 'Begin']) await page.getByRole('button', { name, exact: true }).click({ timeout: 10_000 })
   await page.waitForFunction(() => window.__worldReady === true, null, { timeout: READY_MS, polling: 250 })
   // A few frames more, so the plants and shadows that came with the world are on screen too.
   await page.waitForTimeout(1500)

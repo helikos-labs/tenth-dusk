@@ -1,58 +1,41 @@
-// Temporary (Tasks 8 to 11): chapter 1 for seed REACH1 with a run of its own, so the hero can walk. A first tap on a
-// reachable hex previews its path; a second tap on the same hex walks it, a move every STEP_SECONDS, until it arrives
-// or the run refuses a move; a tap anywhere else replaces the preview (or clears it). Task 13's useGame replaces this.
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { CHAPTER1 } from '../data/book1.ts'
-import { generateZone } from '../rules/gen.ts'
-import { key, type Off } from '../rules/hex.ts'
-import { move, newRun, type RunState } from '../rules/run.ts'
-import WorldScene, { STEP_SECONDS } from '../scenes/WorldScene.tsx'
-import { reachable } from '../scenes/reach.ts'
+// The game's screens (§16): title → name the hero → chapter intro → the world with its HUD, the camp sheet and the
+// pack over it → chapter end, and the portrait guard over everything. useGame holds the state; the world shows from
+// the chapter intro on (so it builds while the intro is read), keyed by the zone, and stays behind the overlays.
+import { useCallback, useMemo } from 'react'
+import type { Off } from '../rules/hex.ts'
+import WorldScene from '../scenes/WorldScene.tsx'
 import { zoneToWorld } from '../world/adapter.ts'
 import { SMALL_SCREEN, detailFor } from '../world/useWorld.ts'
+import CampSheet from './CampSheet.tsx'
+import ChapterEnd from './ChapterEnd.tsx'
+import ChapterIntro from './ChapterIntro.tsx'
+import Hud from './Hud.tsx'
+import NameHero from './NameHero.tsx'
+import Pack from './Pack.tsx'
+import Title from './Title.tsx'
+import Upright from './Upright.tsx'
+import { useGame } from './useGame.ts'
+import './screens.css'
 
 export default function App() {
-  const zone = useMemo(() => generateZone(CHAPTER1, 'REACH1'), [])
-  const world = useMemo(() => zoneToWorld(zone), [zone])
+  const { run, screen, act, blocked, preview, walking, canContinue } = useGame()
+  const zone = run?.zone
+  const world = useMemo(() => (zone ? zoneToWorld(zone) : null), [zone])
   const detail = useMemo(() => detailFor(SMALL_SCREEN), [])
-  const [run, setRun] = useState<RunState>(() => newRun(zone, 'Wren'))
-  const [preview, setPreview] = useState<Off[] | null>(null)
-  const walking = useRef<number | null>(null)
-  useEffect(() => () => window.clearTimeout(walking.current ?? undefined), [])
+  const onTap = useCallback((at: Off) => act({ t: 'tap', at }), [act])
+  const showWorld = run && world && screen !== 'title' && screen !== 'name'
 
-  const walk = useCallback((from: RunState, path: Off[]) => {
-    let s = from
-    let i = 1
-    const next = () => {
-      const after = move(s, path[i])
-      if (after === s) {
-        walking.current = null
-        setPreview(null)
-        return
-      }
-      s = after
-      setRun(s)
-      i++
-      if (i >= path.length) {
-        walking.current = null
-        setPreview(null)
-        return
-      }
-      setPreview(path.slice(i - 1))
-      walking.current = window.setTimeout(next, STEP_SECONDS * 1000)
-    }
-    next()
-  }, [])
-
-  const onTap = useCallback(
-    (o: Off) => {
-      if (walking.current !== null) return
-      const end = preview?.[preview.length - 1]
-      if (preview && end && key(end) === key(o)) walk(run, preview)
-      else setPreview(reachable(run).get(key(o)) ?? null)
-    },
-    [run, preview, walk],
+  return (
+    <>
+      {showWorld && <WorldScene key={`${run.zone.chapter}:${run.zone.seed}`} run={run} world={world} preview={preview} onTap={onTap} detail={detail} />}
+      {screen === 'title' && <Title canContinue={canContinue} act={act} />}
+      {screen === 'name' && <NameHero act={act} />}
+      {screen === 'intro' && <ChapterIntro act={act} />}
+      {screen === 'world' && run && <Hud run={run} preview={preview} walking={walking} blocked={blocked} act={act} />}
+      {screen === 'camp' && run && <CampSheet run={run} act={act} />}
+      {screen === 'pack' && run && <Pack run={run} act={act} />}
+      {screen === 'end' && run && <ChapterEnd run={run} act={act} />}
+      <Upright />
+    </>
   )
-
-  return <WorldScene run={run} world={world} preview={preview} onTap={onTap} detail={detail} />
 }
