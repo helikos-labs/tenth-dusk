@@ -100,7 +100,7 @@ A lit beacon marks every hex within 2 of it as remembered and adds one rumour pi
 - **Climbing:** +1 step for each level gained. Going down costs nothing extra.
 - **Cliffs:** two neighbouring hexes whose levels differ by 2 or more are **not connected**, unless a link joins that pair: a path, stair or rope (a key, §11). The renderer draws a sheer face there.
 - **Sight radius:** 3 + the hero's level, −1 when standing in forest or old wood, and −1 at night. So hills give 4, a mountain 5, and forest 2, as in the concept.
-- **Line of sight:** a target hex within the radius is seen unless a hex on the line between has a **blocking height** above the hero's eye. Blocking height is the hex's level, plus 0.5 for forest or old wood. The hero's eye is at their level + 0.5. Lines are traced through hex centres with the standard hex line algorithm, nudged by ε to break ties consistently. The target hex itself never blocks.
+- **Line of sight:** a target hex within the radius is seen unless a hex on the line between has a **blocking height** at or above the hero's eye. Blocking height is the hex's level, plus 0.5 for forest or old wood. The hero's eye is at their level + 0.5. Lines are traced through hex centres with the standard hex line algorithm, nudged by ε to break ties consistently. The target hex itself never blocks.
 - **Caves** use the lantern for sight instead (§9).
 
 ---
