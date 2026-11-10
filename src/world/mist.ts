@@ -1,9 +1,10 @@
 // The mist of the fog of war (§15.4): one plane over the board's bounds, MIST.height above the ground, drawn in one
-// call. Its shader finds each point's province through the warp, as the ground does (materials.ts), reads the fog
-// from texel 2 of the state texture, blended across the warped borders, and draws MIST.unseen × unseen + MIST.sunk ×
-// sunk alpha, broken up by two layers of scrolling fbm. Walls count as remembered: no mist.
+// call. Its shader finds the province of the ground under each point (along the view ray, down to the fog floor)
+// through the warp, as the ground does (materials.ts), reads the fog from texel 2 of the state texture, blended across
+// the warped borders, and draws MIST.unseen × unseen + MIST.sunk × sunk alpha, broken up by two layers of scrolling
+// fbm. Walls count as remembered: no mist.
 import * as THREE from 'three'
-import { FOG_LOOKUP_GLSL, FOG_TINT_GLSL, FOG_UNIFORMS_GLSL, NOISE_GLSL, WARP_GLSL, type FogUniforms } from './materials.ts'
+import { FOG_FLOOR, FOG_LOOKUP_GLSL, FOG_TINT_GLSL, FOG_UNIFORMS_GLSL, NOISE_GLSL, WARP_GLSL, type FogUniforms } from './materials.ts'
 
 export const MIST = { height: 0.9, unseen: 0.45, sunk: 0.2, colour: new THREE.Color('#5b6878') }
 
@@ -52,7 +53,10 @@ float td_fbm(vec2 p) {
   return s;
 }
 void main() {
-  TDFog f = td_fogAt(rr_province(vWPos.xz, true));
+  // The fog of the ground this pixel lies over: the view ray carried on down to the fog floor, so the mist's edge sits
+  // over the ground's and not MIST.height's parallax beyond it.
+  vec2 g = vWPos.xz + (vWPos.xz - cameraPosition.xz) * (${MIST.height.toFixed(3)} - ${FOG_FLOOR.toFixed(3)}) / max(cameraPosition.y - vWPos.y, 1e-3);
+  TDFog f = td_fogAt(rr_province(g, true));
   float a = (${MIST.unseen.toFixed(3)} * f.w.x + ${MIST.sunk.toFixed(3)} * f.w.y) / max(dot(f.w, vec4(1.0)) + f.wall, 1e-4);
   if (a < 0.002) discard;
   vec2 p = vWPos.xz;

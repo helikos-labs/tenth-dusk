@@ -24,20 +24,25 @@ test('writeFog writes texel 2 of each slot only', () => {
   for (let slot = 0; slot < 4; slot++) for (let i = 0; i < 8; i++) data[slot * TEXELS * 4 + i] = 7 + i
   const before = data.slice()
   const version = tex.version
-  // Slots by world key "q,r" (R5): offset (0,0) → '0,0', offset (0,1) → '1,0'.
+  // Slots by world key "q,r" (R5): offset (0,0) → '0,0', offset (0,1) → '1,0', and an odd row, offset (1,0) → '1,-1'.
   const slots = new Map([
     ['0,0', 0],
     ['1,0', 1],
+    ['1,-1', 2],
   ])
-  const fog = new Map<string, Fog>([['0,0', 3]])
+  const fog = new Map<string, Fog>([
+    ['0,0', 3],
+    ['1,0', 2],
+  ])
   writeFog(tex, slots, fog, new Set(['0,1']), new Set(['0,0']))
   /** Texel 2 of a slot, its four bytes. */
   const texel2 = (slot: number) => [...data.subarray((slot * 3 + 2) * 4, (slot * 3 + 3) * 4)]
   assert.deepEqual(texel2(0), [255, 0, 255, 0], 'offset (0,0): in sight, highlighted, no wall')
   assert.deepEqual(texel2(1), [0, 0, 0, 255], 'offset (0,1): unseen wall')
+  assert.deepEqual(texel2(2), [170, 0, 0, 0], 'offset (1,0): remembered')
   for (let slot = 0; slot < 4; slot++)
     for (let i = 0; i < 8; i++) assert.equal(data[slot * TEXELS * 4 + i], before[slot * TEXELS * 4 + i], `slot ${slot} texel ${i >> 2} unchanged`)
-  for (const slot of [2, 3]) assert.deepEqual(texel2(slot), [0, 0, 0, 0], `slot ${slot} not written`)
+  assert.deepEqual(texel2(3), [0, 0, 0, 0], 'slot 3 not written')
   assert.ok(tex.version > version, 'needsUpdate set')
 })
 

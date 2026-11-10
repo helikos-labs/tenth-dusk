@@ -11,7 +11,7 @@ import type { Fog } from '../rules/sight.ts'
 import type { WorldCell } from '../world/adapter.ts'
 import { buildField, type Field } from '../world/field.ts'
 import { writeFog } from '../world/fog.ts'
-import { SLOTS, TEXELS, boardShape, fogPatch, makeStateTexture, makeTerrainMaterial, makeWaterMaterial, noWarpTexture } from '../world/materials.ts'
+import { SLOTS, TEXELS, boardShape, fogPatch, makeStateTexture, makeTerrainDepthMaterial, makeTerrainMaterial, makeWaterMaterial, noWarpTexture } from '../world/materials.ts'
 import { makeMist } from '../world/mist.ts'
 import { buildRoads } from '../world/roads.ts'
 import { hexIndex, writeCells } from '../world/terrainMesh.ts'
@@ -93,17 +93,18 @@ function Scene({ world, client, fog }: { world: Record<string, WorldCell>; clien
   }, [world, field, uniforms])
 
   // Per-hex state for the shaders: each hex's terrain and Landmark (texel 1), then its fog (texel 2), rewritten
-  // whenever the fog changes; nothing is rebuilt.
+  // whenever the fog changes; nothing is rebuilt, but the shadows redraw (hidden ground and plants cast none).
+  const shadows = useRef(true)
   const invalidate = useThree((st) => st.invalidate)
   const slots = useMemo(() => hexIndex(world), [world])
   const walls = useMemo(() => new Set(Object.values(world).filter((c) => c.wall).map((c) => offKey(c))), [world])
   useLayoutEffect(() => writeCells(uniforms.uState.value, slots, world), [uniforms, slots, world])
   useLayoutEffect(() => {
     writeFog(uniforms.uState.value, slots, fog ?? new Map(Object.values(world).map((c) => [offKey(c), 3 as const])), walls, new Set())
+    shadows.current = true
     invalidate()
   }, [uniforms, slots, world, walls, fog, invalidate])
 
-  const shadows = useRef(true)
   const { terrain, plants } = useWorld(client, uniforms, () => (shadows.current = true))
   // The roads take the fog too: their shared materials, cloned once per scene and patched (materials.ts fogPatch).
   const roadMaterials = useMemo(() => new Map<THREE.Material, THREE.Material>(), [])
@@ -128,7 +129,10 @@ function Scene({ world, client, fog }: { world: Record<string, WorldCell>; clien
     shadows.current = true
     return () => (roads.userData.dispose as () => void)()
   }, [roads])
-  const materials = useMemo(() => ({ terrain: makeTerrainMaterial(uniforms), water: makeWaterMaterial(uniforms) }), [uniforms])
+  const materials = useMemo(
+    () => ({ terrain: makeTerrainMaterial(uniforms), terrainDepth: makeTerrainDepthMaterial(uniforms), water: makeWaterMaterial(uniforms) }),
+    [uniforms],
+  )
   useEffect(() => () => Object.values(materials).forEach((m) => m.dispose()), [materials])
   const mist = useMemo(() => makeMist(uniforms), [uniforms])
   useEffect(
@@ -151,7 +155,16 @@ function Scene({ world, client, fog }: { world: Record<string, WorldCell>; clien
     <>
       <Dusk field={field} />
       <Lights field={field} />
-      {terrain && <mesh geometry={terrain.surface} material={materials.terrain} receiveShadow castShadow matrixAutoUpdate={false} />}
+      {terrain && (
+        <mesh
+          geometry={terrain.surface}
+          material={materials.terrain}
+          customDepthMaterial={materials.terrainDepth}
+          receiveShadow
+          castShadow
+          matrixAutoUpdate={false}
+        />
+      )}
       {terrain?.water && <mesh geometry={terrain.water} material={materials.water} renderOrder={2} matrixAutoUpdate={false} />}
       <primitive object={plants.group} dispose={null} />
       <primitive object={roads} dispose={null} />

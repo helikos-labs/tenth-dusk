@@ -12,7 +12,7 @@ import * as THREE from 'three'
 import type { WorldCell } from './adapter.ts'
 import { CHAPTER1 } from '../data/book1.ts'
 import { toAxial } from '../rules/hex.ts'
-import { makeWarp, rimRay, type Bounds, type Rect } from './field.ts'
+import { WATER_LEVEL, makeWarp, rimRay, type Bounds, type Rect } from './field.ts'
 import { PALETTE } from './palette.ts'
 
 /** Texels per hex in the state texture. */
@@ -354,7 +354,8 @@ const glsl = (c: THREE.Color) => `vec3(${c.r.toFixed(4)}, ${c.g.toFixed(4)}, ${c
 
 /**
  * Fog of war (§15.4), read from texel 2 (fog.ts). Each state treats a colour:
- *   unseen: mixed 92% toward UNSEEN, with slow mist noise (MIST_NOISE toward MIST);
+ *   unseen: the fog floor's colour FLOOR (not the hidden ground's, so nothing of it leaks, R16) mixed 92% toward
+ *   UNSEEN, with slow mist noise (MIST_NOISE toward MIST);
  *   sunk: mixed 85% toward DUSK, the Hush;
  *   remembered: 30% saturation, then 35% toward DUSK;
  *   in sight: unchanged;
@@ -363,6 +364,7 @@ const glsl = (c: THREE.Color) => `vec3(${c.r.toFixed(4)}, ${c.g.toFixed(4)}, ${c
  */
 export const FOG_LOOK = {
   UNSEEN: new THREE.Color('#10151d'),
+  FLOOR: new THREE.Color('#3a4350'),
   DUSK: new THREE.Color('#141a24'),
   MIST: new THREE.Color('#2b3542'),
   MIST_NOISE: 0.45,
@@ -371,6 +373,8 @@ export const FOG_LOOK = {
 }
 /** States blend over this width across a province border (world units: a hex is 2 across its corners). */
 export const FOG_BLEND = 0.12
+/** Unseen and sunk land sinks to this flat floor (a little above the water level), hiding its relief (R16). */
+export const FOG_FLOOR = WATER_LEVEL + 0.03
 
 /** The fog treatments, given a state's weights. Needs uInner and the noise (NOISE_GLSL). */
 export const FOG_TINT_GLSL = /* glsl */ `
@@ -396,14 +400,28 @@ vec3 td_remembered(vec3 c) {
 float td_ring(vec2 p) {
   return length(max(max(uInner.xy - p, p - uInner.zw), 0.0));
 }
-// Colour c at world point p as fog f shows it; mist (0 to 1) is the unseen's slow noise.
-vec3 td_tint(vec3 c, TDFog f, vec2 p, float mist) {
-  float sum = max(dot(f.w, vec4(1.0)) + f.wall, 1e-4);
-  vec3 unseen = mix(mix(c, ${glsl(FOG_LOOK.UNSEEN)}, 0.92), ${glsl(FOG_LOOK.MIST)}, ${FOG_LOOK.MIST_NOISE.toFixed(3)} * mist);
+float td_sum(TDFog f) {
+  return max(dot(f.w, vec4(1.0)) + f.wall, 1e-4);
+}
+// The unseen and sunk share: how far land sinks to the fog floor and water fades out.
+float td_hidden(TDFog f) {
+  return (f.w.x + f.w.y) / td_sum(f);
+}
+// The unseen treatment: the fog floor's colour, whatever lies hidden; mist (0 to 1) is its slow noise.
+vec3 td_unseen(float mist) {
+  return mix(mix(${glsl(FOG_LOOK.FLOOR)}, ${glsl(FOG_LOOK.UNSEEN)}, 0.92), ${glsl(FOG_LOOK.MIST)}, ${FOG_LOOK.MIST_NOISE.toFixed(3)} * mist);
+}
+// Colour c at world point p as fog f shows it, all but the unseen share, which keeps c: the ground applies that after
+// lighting (td_unseen), so unseen land isn't shaded by the sun.
+vec3 td_tintSeen(vec3 c, TDFog f, vec2 p) {
   vec3 sunk = mix(c, ${glsl(FOG_LOOK.DUSK)}, 0.85);
   vec3 rem = td_remembered(c);
   vec3 wall = mix(rem, ${glsl(FOG_LOOK.UNSEEN)}, ${FOG_LOOK.WALL_DARK.toFixed(3)} * min(td_ring(p) / ${FOG_LOOK.WALL_FADE.toFixed(1)}, 1.0));
-  return (unseen * f.w.x + sunk * f.w.y + rem * f.w.z + c * f.w.w + wall * f.wall) / sum;
+  return (c * (f.w.x + f.w.w) + sunk * f.w.y + rem * f.w.z + wall * f.wall) / td_sum(f);
+}
+// Colour c at world point p as fog f shows it, every share at once.
+vec3 td_tint(vec3 c, TDFog f, vec2 p, float mist) {
+  return td_tintSeen(c, f, p) + (td_unseen(mist) - c) * (f.w.x / td_sum(f));
 }
 // The unseen's slow mist noise at p (0 to 1).
 float td_mistNoise(vec2 p, float t) {
@@ -441,6 +459,31 @@ TDFog td_fogAt(RRProv P) {
 }
 `
 
+/** The fog's uniform declarations, for a shader that reads it. */
+export const FOG_UNIFORMS_GLSL = /* glsl */ `
+uniform sampler2D uState;
+uniform float uStateSize;
+uniform vec4 uRect;
+uniform vec4 uRim;
+uniform sampler2D uWarp;
+uniform vec4 uWarpBox;
+uniform vec4 uInner;`
+
+/**
+ * How far a ground vertex sinks to the fog floor (0 to 1): the unseen and sunk share of the fog at its province, from
+ * its object-space position and its coast distance (the sea floor, at or below 0, never sinks). Needs NOISE_GLSL,
+ * WARP_GLSL, FOG_TINT_GLSL and FOG_LOOKUP_GLSL.
+ */
+const SINK_GLSL = /* glsl */ `
+float td_sinkAt(vec3 pos, float coast) {
+  if (coast <= 0.0) return 0.0;
+  vec3 w = (modelMatrix * vec4(pos, 1.0)).xyz;
+  return td_hidden(td_fogAt(rr_province(w.xz, true)));
+}
+`
+/** Everything a vertex shader needs for `td_sinkAt`: the fog's uniforms and lookups. */
+const SINK_VERTEX_GLSL = `${FOG_UNIFORMS_GLSL}\n${NOISE_GLSL}\n${WARP_GLSL}\n${FOG_TINT_GLSL}\n${FOG_LOOKUP_GLSL}\n${SINK_GLSL}`
+
 export interface TerrainUniforms {
   uTime: { value: number }
   uState: { value: THREE.DataTexture }
@@ -461,15 +504,6 @@ export interface TerrainUniforms {
 /** What the fog of war reads (`windPatch` for plants, mist.ts): the state texture, the province lookup and uInner. */
 export type FogUniforms = Pick<TerrainUniforms, 'uTime' | 'uState' | 'uStateSize' | 'uRect' | 'uRim' | 'uWarp' | 'uWarpBox' | 'uInner'>
 
-/** The fog's uniform declarations, for a shader that reads it. */
-export const FOG_UNIFORMS_GLSL = /* glsl */ `
-uniform sampler2D uState;
-uniform float uStateSize;
-uniform vec4 uRect;
-uniform vec4 uRim;
-uniform sampler2D uWarp;
-uniform vec4 uWarpBox;
-uniform vec4 uInner;`
 
 /** Width of the ink line along a province border, in world units (a hex is 2 across its corners). */
 const INK_WIDTH = 0.024
@@ -486,13 +520,24 @@ attribute float aRock;
 attribute float aCoast;
 varying vec3 vWPos;
 varying float vRock;
-varying float vCoast;`,
+varying float vCoast;
+varying float vSink;
+${SINK_VERTEX_GLSL}`,
+      )
+      .replace(
+        '#include <beginnormal_vertex>',
+        `#include <beginnormal_vertex>
+// Fog of war (R16): unseen and sunk land sinks to the flat fog floor, so no relief shows through; its normal turns up.
+float td_sink = td_sinkAt(position, aCoast);
+objectNormal = normalize(mix(objectNormal, vec3(0.0, 1.0, 0.0), td_sink));`,
       )
       .replace(
         '#include <begin_vertex>',
         `#include <begin_vertex>
+transformed.y = mix(transformed.y, ${FOG_FLOOR.toFixed(3)}, td_sink);
+vSink = td_sink;
 vWPos = (modelMatrix * vec4(transformed, 1.0)).xyz;
-vRock = aRock;
+vRock = aRock * (1.0 - td_sink);
 vCoast = aCoast;`,
       )
     shader.fragmentShader = shader.fragmentShader
@@ -512,6 +557,7 @@ uniform vec4 uInner;
 varying vec3 vWPos;
 varying float vRock;
 varying float vCoast;
+varying float vSink;
 ${NOISE_GLSL}
 ${CLOUD_GLSL}
 ${WARP_GLSL}
@@ -550,9 +596,10 @@ diffuseColor.rgb *= 1.0 - rr_ink * mix(0.24, 0.14, smoothstep(0.15, 0.6, rr_lum)
 // A target province takes a faint wash of the hint, inside its whole outline.
 if (rr_s0.r > 0.5) diffuseColor.rgb = mix(diffuseColor.rgb, uHint, 0.12 * (1.0 - smoothstep(0.0, 0.5, rr_rim)));
 diffuseColor.rgb *= 1.0 - rr_cloud(vWPos.xz, uTime);
-// Fog of war (§15.4): the province's state from texel 2, blended with its neighbours' across the warped border.
+// Fog of war (§15.4): the province's state from texel 2, blended with its neighbours' across the warped border. The
+// unseen share is tinted after lighting (opaque_fragment).
 TDFog rr_fog = td_fogAt(rr_prov);
-diffuseColor.rgb = td_tint(diffuseColor.rgb, rr_fog, vWPos.xz, rr_fog.w.x > 0.0 ? td_mistNoise(vWPos.xz, uTime) : 0.0);`,
+diffuseColor.rgb = td_tintSeen(diffuseColor.rgb, rr_fog, vWPos.xz);`,
       )
       .replace(
         '#include <normal_fragment_maps>',
@@ -568,7 +615,7 @@ if (vRock > 0.02) {
 }
 // Snow (the bright, grey-free vertex colours): wind ripples in the normal, a little grain in its white, and a cold blue
 // where it turns away from the sun, so a snowfield reads as snow and not as smooth white plastic.
-float rr_snow = smoothstep(0.38, 0.6, min(min(vColor.r, vColor.g), vColor.b));
+float rr_snow = smoothstep(0.38, 0.6, min(min(vColor.r, vColor.g), vColor.b)) * (1.0 - vSink);
 if (rr_snow > 0.01) {
   vec2 sp = mat2(0.8, -0.6, 0.6, 0.8) * vWPos.xz * vec2(9.0, 3.2);
   float s0 = rr_snoise(sp);
@@ -596,8 +643,30 @@ if (rr_s0.g > 0.25) {
   totalEmissiveRadiance += hc * (1.0 - smoothstep(0.0, 0.065, rr_rim)) * 1.1;
 }`,
       )
+      .replace(
+        '#include <opaque_fragment>',
+        `#include <opaque_fragment>
+// The unseen share after lighting: flat fog, not shaded by the sun.
+gl_FragColor.rgb = mix(gl_FragColor.rgb, td_unseen(rr_fog.w.x > 0.0 ? td_mistNoise(vWPos.xz, uTime) : 0.0), rr_fog.w.x / td_sum(rr_fog));`,
+      )
   }
-  mat.customProgramCacheKey = () => 'td-terrain-fog-1'
+  mat.customProgramCacheKey = () => 'td-terrain-fog-2'
+  return mat
+}
+
+/**
+ * The terrain's depth material for the shadow pass: the ground sunk to the fog floor as the terrain material sinks it,
+ * so hidden relief casts no shadow. Give it to the terrain mesh as its customDepthMaterial.
+ */
+export function makeTerrainDepthMaterial(uniforms: FogUniforms): THREE.MeshDepthMaterial {
+  const mat = new THREE.MeshDepthMaterial()
+  mat.onBeforeCompile = (shader) => {
+    Object.assign(shader.uniforms, uniforms)
+    shader.vertexShader = shader.vertexShader
+      .replace('#include <common>', `#include <common>\nattribute float aCoast;\n${SINK_VERTEX_GLSL}`)
+      .replace('#include <begin_vertex>', `#include <begin_vertex>\ntransformed.y = mix(transformed.y, ${FOG_FLOOR.toFixed(3)}, td_sinkAt(position, aCoast));`)
+  }
+  mat.customProgramCacheKey = () => 'td-terrain-depth-fog-1'
   return mat
 }
 
@@ -694,9 +763,11 @@ void main() {
     if (s0.r > 0.5) col += uHint * (1.0 - smoothstep(0.0, 0.1, d)) * (0.6 + 0.4 * sin(uTime * 3.4)) * 1.1;
     if (s0.g > 0.25) col += (s0.g > 0.75 ? vec3(0.45, 1.0, 0.4) : vec3(1.0, 0.3, 0.2)) * (1.0 - smoothstep(0.0, 0.065, d));
   }
-  // Fog of war, as on the ground (the sea, no province, is the Hush).
+  // Fog of war, as on the ground (the sea, no province, is the Hush); unseen and sunk water fades out, so the fog
+  // floor shows instead of a river's course (R16).
   TDFog fog = td_fogAt(prov);
   col = td_tint(col, fog, vWPos.xz, fog.w.x > 0.0 ? td_mistNoise(vWPos.xz, uTime) : 0.0);
+  alpha *= 1.0 - 0.95 * td_hidden(fog);
   gl_FragColor = vec4(col, clamp(alpha, 0.0, 1.0));
   #include <tonemapping_fragment>
   #include <colorspace_fragment>
@@ -708,9 +779,9 @@ void main() {
 /**
  * Wind for instanced plants: each vertex sways by its height above the plant's base, in gusts that roll across the
  * board. `sway` scales it (trees 0.07, grass and flowers more; 0 for none). Given the fog's uniforms too, a plant reads
- * texel 2 of the province at its instance's origin (through the warp, as the ground does): unseen, it scales to
- * nothing; otherwise it takes the ground's treatment of its state (remembered and wall desaturated, sunk sunk into the
- * Hush).
+ * texel 2 of the province at its instance's origin (through the warp, as the ground does): unseen or sunk (its ground
+ * sunk to the fog floor), it scales to nothing; otherwise it takes the ground's treatment of its state (remembered and
+ * wall desaturated). Its shadow needs `plantDepthMaterials`.
  */
 export function windPatch(mat: THREE.Material, uniforms: { uTime: { value: number } } & Partial<FogUniforms>, sway: number, key: string) {
   const fog = !!uniforms.uState
@@ -749,9 +820,9 @@ export function windPatch(mat: THREE.Material, uniforms: { uTime: { value: numbe
   transformed.z += rr_off.y;` +
           (fog
             ? `
-  // Fog of war: the province at the instance's origin; an unseen plant (not on a wall) scales to nothing.
+  // Fog of war: the province at the instance's origin; an unseen or sunk plant (not on a wall) scales to nothing.
   rr_fog = td_fogOf(rr_hexOf((modelMatrix * vec4(rr_base, 1.0)).xz));
-  if (rr_fog.a < 0.5 && rr_fog.r < 1.0 / 6.0) transformed *= 0.0;`
+  if (rr_fog.a < 0.5 && rr_fog.r < 0.5) transformed *= 0.0;`
             : ''),
       )
       .replace(
@@ -764,19 +835,52 @@ export function windPatch(mat: THREE.Material, uniforms: { uTime: { value: numbe
 #endif`,
       )
   }
-  mat.customProgramCacheKey = () => `rr-wind2-${key}${fog ? '-fog1' : ''}`
+  mat.customProgramCacheKey = () => `rr-wind2-${key}${fog ? '-fog2' : ''}`
 }
 
 /**
- * The fog of war on a plain lit material (roads): each fragment finds its province through the warp and takes the
- * ground's treatment of its fog, blended across the borders as on the ground.
+ * Depth materials for fog-enabled plants' shadows (R16): an unseen or sunk plant scales to nothing in the shadow pass
+ * as in the colour pass (`windPatch`), so hidden plants cast no shadows. No wind (a shadow's sway is too small to see).
+ * One for instanced meshes and one for tinted ones, as DEPTH has.
+ */
+export function plantDepthMaterials(uniforms: FogUniforms): { instanced: THREE.MeshDepthMaterial; tinted: THREE.MeshDepthMaterial } {
+  const make = (key: string) => {
+    const mat = new THREE.MeshDepthMaterial()
+    mat.onBeforeCompile = (shader) => {
+      Object.assign(shader.uniforms, uniforms)
+      shader.vertexShader = shader.vertexShader
+        .replace('#include <common>', `#include <common>\n${FOG_UNIFORMS_GLSL}\n${WARP_GLSL}\n${FOG_TEXEL_GLSL}`)
+        .replace(
+          '#include <begin_vertex>',
+          `#include <begin_vertex>
+#ifdef USE_INSTANCING
+  vec4 td_s = td_fogOf(rr_hexOf((modelMatrix * vec4(instanceMatrix[3].xyz, 1.0)).xz));
+#else
+  vec4 td_s = td_fogOf(rr_hexOf((modelMatrix * vec4(0.0, 0.0, 0.0, 1.0)).xz));
+#endif
+  if (td_s.a < 0.5 && td_s.r < 0.5) transformed *= 0.0;`,
+        )
+    }
+    mat.customProgramCacheKey = () => `td-plant-depth-fog-${key}`
+    return mat
+  }
+  return { instanced: make('instanced'), tinted: make('tinted') }
+}
+
+/**
+ * The fog of war on a plain lit material (roads): it sinks just below the fog floor as the ground under it sinks, so
+ * a hidden road lies under the floor; and each fragment finds its province through the warp and takes the ground's
+ * treatment of its fog, blended across the borders as on the ground (the unseen share after lighting).
  */
 export function fogPatch(mat: THREE.Material, uniforms: FogUniforms, key: string) {
   mat.onBeforeCompile = (shader) => {
     Object.assign(shader.uniforms, uniforms)
     shader.vertexShader = shader.vertexShader
-      .replace('#include <common>', `#include <common>\nvarying vec3 td_wpos;`)
-      .replace('#include <begin_vertex>', `#include <begin_vertex>\ntd_wpos = (modelMatrix * vec4(transformed, 1.0)).xyz;`)
+      .replace('#include <common>', `#include <common>\nvarying vec3 td_wpos;\n${SINK_VERTEX_GLSL}`)
+      .replace(
+        '#include <begin_vertex>',
+        `#include <begin_vertex>\ntransformed.y = mix(transformed.y, ${(FOG_FLOOR - 0.03).toFixed(3)}, td_sinkAt(position, 1.0));\ntd_wpos = (modelMatrix * vec4(transformed, 1.0)).xyz;`,
+      )
     shader.fragmentShader = shader.fragmentShader
       .replace(
         '#include <common>',
@@ -786,10 +890,15 @@ export function fogPatch(mat: THREE.Material, uniforms: FogUniforms, key: string
         '#include <color_fragment>',
         `#include <color_fragment>
 TDFog td_f = td_fogAt(rr_province(td_wpos.xz, true));
-diffuseColor.rgb = td_tint(diffuseColor.rgb, td_f, td_wpos.xz, td_f.w.x > 0.0 ? td_mistNoise(td_wpos.xz, uTime) : 0.0);`,
+diffuseColor.rgb = td_tintSeen(diffuseColor.rgb, td_f, td_wpos.xz);`,
+      )
+      .replace(
+        '#include <opaque_fragment>',
+        `#include <opaque_fragment>
+gl_FragColor.rgb = mix(gl_FragColor.rgb, td_unseen(td_f.w.x > 0.0 ? td_mistNoise(td_wpos.xz, uTime) : 0.0), td_f.w.x / td_sum(td_f));`,
       )
   }
-  mat.customProgramCacheKey = () => `td-fog1-${key}`
+  mat.customProgramCacheKey = () => `td-fog2-${key}`
 }
 
 // ---------------------------------------------------------------- shadows and compiling ahead

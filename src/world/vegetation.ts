@@ -14,7 +14,7 @@ import type { WorldCell } from './adapter.ts'
 import { SQRT3, WARP, WATER_LEVEL, fbm, fray, hash01, hexCenter, smoothstep, type Field, type Probe, type Rect } from './field.ts'
 import { flowersOf } from './flora.ts'
 import { onRim } from './layout.ts'
-import { castShadows, windPatch, type FogUniforms } from './materials.ts'
+import { castShadows, plantDepthMaterials, windPatch, type FogUniforms } from './materials.ts'
 import { LATTICE } from './terrainMesh.ts'
 
 /** Hex centres keep a clearing this wide for the hero and Landmarks. */
@@ -503,9 +503,12 @@ interface Part {
 export class PlantMeshes {
   readonly group = new THREE.Group()
   private parts: Part[]
+  /** With the fog: the plants' own shadow depth materials, which hide unseen plants' shadows too. */
+  private depth: ReturnType<typeof plantDepthMaterials> | null
 
   /** With the fog's uniforms (materials.ts FogUniforms) the plants show the fog of war (`windPatch`). */
   constructor(uniforms: { uTime: { value: number } } & Partial<FogUniforms>) {
+    this.depth = uniforms.uState ? plantDepthMaterials(uniforms as FogUniforms) : null
     const plant = (sway: number, key: string, opts: THREE.MeshStandardMaterialParameters = {}) => {
       const m = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.85, metalness: 0, ...opts })
       windPatch(m, uniforms, sway, key)
@@ -542,7 +545,7 @@ export class PlantMeshes {
       const m = new THREE.InstancedMesh(p.geo, p.mat, 1)
       if (p.tinted) m.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(3), 3)
       m.castShadow = p.cast
-      castShadows(m)
+      this.shade(m, p)
       g.add(m)
     }
     return g
@@ -575,13 +578,21 @@ export class PlantMeshes {
       p.mat.dispose()
       p.mesh?.dispose()
     }
+    this.depth?.instanced.dispose()
+    this.depth?.tinted.dispose()
+  }
+
+  /** A mesh's shadow depth material: the fog's own when the plants show the fog, else the shared one (castShadows). */
+  private shade(mesh: THREE.InstancedMesh, p: Part) {
+    if (this.depth && p.cast) mesh.customDepthMaterial = mesh.instanceColor ? this.depth.tinted : this.depth.instanced
+    castShadows(mesh)
   }
 
   private make(p: Part, capacity: number): THREE.InstancedMesh {
     const mesh = new THREE.InstancedMesh(p.geo, p.mat, capacity)
     if (p.tinted) mesh.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(capacity * 3), 3)
     mesh.castShadow = p.cast
-    castShadows(mesh)
+    this.shade(mesh, p)
     mesh.receiveShadow = true
     mesh.frustumCulled = false
     mesh.matrixAutoUpdate = false
