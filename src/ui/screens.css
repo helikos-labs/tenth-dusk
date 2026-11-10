@@ -705,6 +705,11 @@
 }
 
 /* The ?perf=1 overlay (PerfOverlay.tsx): small, over everything, never in the way of a tap. */
+.td-perf-gpu {
+  max-width: 180px;
+  overflow-wrap: anywhere;
+}
+
 .td-perf {
   position: fixed;
   right: calc(10px + var(--td-right));

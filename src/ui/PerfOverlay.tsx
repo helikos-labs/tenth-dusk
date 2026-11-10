@@ -6,6 +6,7 @@
 // tests/e2e/perf.mjs.
 import { addAfterEffect } from '@react-three/fiber'
 import { useEffect, useRef, useState } from 'react'
+import { PERF_DPR, PERF_OFF, perfStats } from '../testHooks.ts'
 
 /** A long task is a main-thread task over this (ms). */
 const LONG_MS = 100
@@ -82,6 +83,15 @@ export default function PerfOverlay({ startAt, readyAt }: { startAt: number | nu
         long {n.long} ({n.longInPlay} in play)
       </span>
       <span>{readyAt === null ? 'world …' : `world ${(readyAt / 1000).toFixed(1)} s (${((fromStart ?? 0) / 1000).toFixed(1)} s)`}</span>
+      <span>
+        {(perfStats.triangles / 1000).toFixed(0)}k tris · {perfStats.calls} calls
+      </span>
+      <span>
+        {perfStats.width}×{perfStats.height} @{perfStats.ratio.toFixed(2)}
+        {PERF_DPR === null ? '' : ' (dpr set)'}
+      </span>
+      <span>off: {PERF_OFF.size ? [...PERF_OFF].join(',') : 'none'}</span>
+      <span className="td-perf-gpu">{perfStats.gpu || 'gpu …'}</span>
     </div>
   )
 }

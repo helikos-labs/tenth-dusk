@@ -15,13 +15,13 @@
 // On phones (SMALL_SCREEN) the scene draws on demand: 30 frames a second while only idle animation runs, every frame
 // while the hero walks, the camera eases or a pinch zooms; the shadows redraw only when something changes.
 // oxlint-disable react/immutability -- three.js objects (the camera, fog, lights, uniforms and shadow map) change in place.
-import { Canvas, useFrame, useThree } from '@react-three/fiber'
+import { Canvas, addAfterEffect, useFrame, useThree } from '@react-three/fiber'
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import * as THREE from 'three'
 import { distance, toAxial, toOffset, type Off } from '../rules/hex.ts'
 import type { RunState } from '../rules/run.ts'
 import type { LandmarkKind } from '../rules/zone.ts'
-import { TEST, hooks } from '../testHooks.ts'
+import { PERF, PERF_DPR, PERF_OFF, TEST, hooks, perfStats } from '../testHooks.ts'
 import type { WorldCell } from '../world/adapter.ts'
 import { SQRT3, WATER_LEVEL, buildField, hexAt, hexCenter, type Field, type Pt } from '../world/field.ts'
 import { writeFog } from '../world/fog.ts'
@@ -138,10 +138,10 @@ export default function WorldScene({ run, world, preview, onTap, detail, onReady
         frameloop={SMALL_SCREEN ? 'demand' : 'always'}
         // PCF soft shadows: three.js r186 removed PCFSoftShadowMap (it falls back with a warning); its PCF is the soft
         // one. They redraw only when something changes (ShadowRefresh).
-        shadows={{ type: THREE.PCFShadowMap, autoUpdate: false }}
-        dpr={[1, SMALL_SCREEN ? 1.6 : 2]}
+        shadows={PERF_OFF.has('shadows') ? false : { type: THREE.PCFShadowMap, autoUpdate: false }}
+        dpr={PERF_DPR ?? [1, SMALL_SCREEN ? 1.6 : 2]}
         camera={{ fov: CAMERA.fov, near: 0.5, far: 400 }}
-        gl={{ antialias: true, powerPreference: 'high-performance' }}
+        gl={{ antialias: !PERF_OFF.has('aa'), powerPreference: 'high-performance' }}
         onCreated={({ gl }) => {
           gl.toneMapping = THREE.ACESFilmicToneMapping
         }}
@@ -149,6 +149,7 @@ export default function WorldScene({ run, world, preview, onTap, detail, onReady
         <Scene world={world} client={client} run={run} preview={preview} onTap={onTap} onReady={onReady && (() => onReady(startedAt))} />
         {SMALL_SCREEN && <Throttle fps={IDLE_FPS} />}
         <ContextWatch onLost={onLost} onRestored={onRestored} />
+        {PERF && <PerfProbe />}
       </Canvas>
     </div>
   )
@@ -554,13 +555,13 @@ function Scene({ world, client, run, preview, onTap, onReady }: SceneProps) {
           />
         )}
         {terrain?.water && <mesh geometry={terrain.water} material={materials.water} renderOrder={2} matrixAutoUpdate={false} />}
-        <primitive object={plants.group} dispose={null} />
+        <primitive object={plants.group} visible={!PERF_OFF.has('plants')} dispose={null} />
         <primitive object={roads} dispose={null} />
         {landmarks.map((l) => (
           <Landmark key={l.key} hex={l.key} kind={l.kind} lit={run.lit.includes(l.key)} at={l.at} fog={run.fog.get(l.key) ?? 0} picks={picks} />
         ))}
         {tube && <mesh geometry={tube} material={materials.tube} />}
-        {terrain && <primitive object={mist} dispose={null} />}
+        {terrain && <primitive object={mist} visible={!PERF_OFF.has('mist')} dispose={null} />}
       </group>
       <ShadowRefresh need={shadows} />
     </>
@@ -685,6 +686,28 @@ function Throttle({ fps }: { fps: number }) {
     const id = setInterval(() => invalidate(), 1000 / fps)
     return () => clearInterval(id)
   }, [invalidate, fps])
+  return null
+}
+
+/** ?perf=1: records the GPU's name and the last frame's triangles, draw calls and drawing size for the overlay. */
+function PerfProbe() {
+  const gl = useThree((st) => st.gl)
+  useEffect(() => {
+    const ctx = gl.getContext()
+    const ext = ctx.getExtension('WEBGL_debug_renderer_info')
+    perfStats.gpu = String(ctx.getParameter(ext ? ext.UNMASKED_RENDERER_WEBGL : ctx.RENDERER))
+  }, [gl])
+  useEffect(
+    () =>
+      addAfterEffect(() => {
+        perfStats.triangles = gl.info.render.triangles
+        perfStats.calls = gl.info.render.calls
+        perfStats.width = gl.domElement.width
+        perfStats.height = gl.domElement.height
+        perfStats.ratio = gl.getPixelRatio()
+      }),
+    [gl],
+  )
   return null
 }
 

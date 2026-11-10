@@ -7,3 +7,15 @@ export const PERF = typeof window !== 'undefined' && new URLSearchParams(window.
 
 /** The window as the test hooks see it. */
 export const hooks = (typeof window !== 'undefined' ? window : {}) as unknown as Record<string, unknown>
+
+/**
+ * With ?perf=1, `&off=` switches render features off to find a slow phone's bottleneck (aa, shadows, plants, mist,
+ * comma-separated) and `&dpr=` caps the pixel ratio (0.5 to 2). Without ?perf=1 both are ignored.
+ */
+const perfParams = typeof window !== 'undefined' && PERF ? new URLSearchParams(window.location.search) : null
+export const PERF_OFF: ReadonlySet<string> = new Set((perfParams?.get('off') ?? '').split(',').filter(Boolean))
+const askedDpr = Number(perfParams?.get('dpr'))
+export const PERF_DPR: number | null = askedDpr >= 0.5 && askedDpr <= 2 ? askedDpr : null
+
+/** What the overlay shows about the renderer, written by the scene's probe (?perf=1 only). */
+export const perfStats = { gpu: '', triangles: 0, calls: 0, width: 0, height: 0, ratio: 0 }
