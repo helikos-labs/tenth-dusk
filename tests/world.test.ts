@@ -55,6 +55,7 @@ test('zoneToWorld keys cells by axial q,r and carries terrain, level, roads, for
   z.cells.get('1,0')!.terrain = 'oldwood'
   z.cells.get('0,0')!.terrain = 'heath'
   z.cells.get('0,0')!.landmark = 'beacon'
+  z.cells.get('1,2')!.wall = true
   const w = zoneToWorld(z)
   assert.equal(Object.keys(w).length, 6)
   assert.deepEqual(w['0,0'], { q: 0, r: 0, terrain: 'grassland', level: 0, wall: false, landmark: 'beacon', heath: true })
@@ -63,7 +64,10 @@ test('zoneToWorld keys cells by axial q,r and carries terrain, level, roads, for
   // Row 1 is odd: toAxial shifts it right by one and r = -1.
   assert.deepEqual(w['1,-1'], { q: 1, r: -1, terrain: 'forest', level: 0, wall: false, dense: true })
   assert.equal(w['2,-1'].terrain, TERRAIN.mountain.engine)
+  assert.equal(w['2,-1'].level, 2)
+  assert.equal(w['2,-1'].wall, false)
   assert.equal(w['3,-1'].terrain, 'blight')
+  assert.equal(w['3,-1'].wall, true)
 })
 
 test('hexAt finds every hex centre and points near it', () => {
@@ -321,3 +325,54 @@ test('summits round off: no Mountain vertex stands as a needle above its neighbo
   assert.ok(drops.length > 100, `only ${drops.length} summits`)
   assert.ok(mid < 0.13 && p99 < 0.34 && max < 0.45, `summits stand ${mid.toFixed(2)} above their neighbours (one in a hundred ${p99.toFixed(2)}, the sharpest ${max.toFixed(2)})`)
 })
+
+test(
+  'summits round off across the whole valley: no Mountain vertex stands as a needle above its neighbours',
+  { todo: 'Task 9: thick massifs exceed the summit thresholds' },
+  () => {
+    // The corner pin above, over every mountain vertex on the board (see onBoard). Measured at 7f00e23's engine:
+    // 1,367 summits, the middle 0.135 above its neighbours, one in a hundred 0.385, the sharpest 0.447 (thresholds
+    // 0.13, 0.34, 0.45). Deep inside VALLEY's thick ranges the spires term (smoothstep(0.35, 1.25, dmc)) runs at full
+    // strength, which R&R's thin ranges never reached; summits far from the coast are as sharp as those near it.
+    const step = 0.113
+    const rowH = (step * Math.sqrt(3)) / 2
+    const centres = Object.values(VALLEY).map((c) => hexCenter(c.q, c.r))
+    const x0 = Math.min(...centres.map((c) => c.x)) - 1
+    const x1 = Math.max(...centres.map((c) => c.x)) + 1
+    const z0 = Math.min(...centres.map((c) => c.z)) - 1
+    const z1 = Math.max(...centres.map((c) => c.z)) + 1
+    const n = Math.ceil((x1 - x0) / step)
+    const m = Math.ceil((z1 - z0) / rowH)
+    const drops: number[] = []
+    const f = buildField(VALLEY)
+    const H = new Float64Array((n + 1) * (m + 1))
+    const M = new Uint8Array(H.length)
+    const on = new Uint8Array(H.length)
+    const id = (i: number, j: number) => j * (n + 1) + i
+    for (let j = 0; j <= m; j++)
+      for (let i = 0; i <= n; i++) {
+        const x = x0 + i * step + (j % 2 ? step / 2 : 0)
+        const z = z0 + j * rowH
+        const p = f.probe(x, z)
+        on[id(i, j)] = onBoard(f, VALLEY, x, z) ? 1 : 0
+        H[id(i, j)] = p.height
+        M[id(i, j)] = on[id(i, j)] && p.ground === 'mountain' && p.height > 0.6 ? 1 : 0
+      }
+    for (let j = 1; j < m; j++)
+      for (let i = 1; i < n; i++) {
+        if (!M[id(i, j)]) continue
+        const odd = j % 2
+        const around = [id(i - 1, j), id(i + 1, j), id(i - 1 + odd, j - 1), id(i + odd, j - 1), id(i - 1 + odd, j + 1), id(i + odd, j + 1)]
+        if (around.some((k) => !on[k])) continue
+        const nb = around.map((k) => H[k])
+        const h = H[id(i, j)]
+        if (nb.every((v) => v < h)) drops.push(h - nb.reduce((s, v) => s + v, 0) / 6)
+      }
+    drops.sort((p, q) => p - q)
+    const mid = drops[Math.floor(drops.length / 2)]
+    const p99 = drops[Math.floor(drops.length * 0.99)]
+    const max = drops[drops.length - 1]
+    assert.ok(drops.length > 100, `only ${drops.length} summits`)
+    assert.ok(mid < 0.13 && p99 < 0.34 && max < 0.45, `summits stand ${mid.toFixed(2)} above their neighbours (one in a hundred ${p99.toFixed(2)}, the sharpest ${max.toFixed(2)})`)
+  },
+)
