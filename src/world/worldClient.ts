@@ -30,7 +30,7 @@ function workerPort(receive: (r: WorldReply) => void, fail: () => void): Port | 
   return { post: (req) => worker.postMessage(req), close: () => worker.terminate() }
 }
 
-/** The same builder on this thread, a task later (so the table and tray draw first). */
+/** The same builder on this thread, a task later (so the scene draws its backdrop first). */
 function localPort(receive: (r: WorldReply) => void): Port {
   let builder: WorldBuilder | null = null
   let timer: ReturnType<typeof setTimeout> | undefined

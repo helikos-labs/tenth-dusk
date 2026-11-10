@@ -1,6 +1,6 @@
 // Copied from helikos-labs/rift-and-root@7f00e23 src/board3d/useWorld.ts, adapted for Tenth Dusk.
 // The 3D board's world on the main thread. The terrain mesh, water and plants are built in the world worker
-// (world.worker.ts, worldBuild.ts): in full when the board mounts, while the table and tray already show, then only
+// (world.worker.ts, worldBuild.ts): in full when the board mounts, while the scene's backdrop already shows, then only
 // what changed when hexes change terrain or a Landmark comes or goes. `useWorldClient` sends the boards from outside
 // the canvas, so the first build starts before the scene is set up; `useWorld` swaps the results into the meshes in
 // place, so no frame waits on a build.
@@ -8,7 +8,7 @@ import { useThree } from '@react-three/fiber'
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type * as THREE from 'three'
 import type { WorldCell } from './adapter.ts'
-import { makeWarpTexture } from './materials.ts'
+import { makeWarpTexture, warpBoxUniform } from './materials.ts'
 import { applyTerrain, type TerrainGeometry } from './terrainMesh.ts'
 import { PlantMeshes } from './vegetation.ts'
 import type { WorldUpdate } from './worldBuild.ts'
@@ -82,7 +82,11 @@ export interface World {
  * browser checks: when the first board went to the worker and when its world was applied (performance.now()), and
  * each update's cost; Board3D adds when the world first showed (`revealed`).
  */
-export function useWorld(client: WorldClient, uniforms: { uTime: { value: number }; uWarp: { value: THREE.DataTexture } }, changed: () => void): World {
+export function useWorld(
+  client: WorldClient,
+  uniforms: { uTime: { value: number }; uWarp: { value: THREE.DataTexture }; uWarpBox: { value: THREE.Vector4 } },
+  changed: () => void,
+): World {
   const invalidate = useThree((st) => st.invalidate)
   const [plants] = useState(() => new PlantMeshes(uniforms))
   const [terrain, setTerrain] = useState<TerrainGeometry | null>(null)
@@ -97,7 +101,8 @@ export function useWorld(client: WorldClient, uniforms: { uTime: { value: number
     apply.current = (u) => {
       const t0 = performance.now()
       if (u.warp) {
-        uniforms.uWarp.value = makeWarpTexture(u.warp.seed, u.warp.data)
+        uniforms.uWarp.value = makeWarpTexture(u.warp.seed, u.warp.data, u.warp.box)
+        warpBoxUniform(uniforms.uWarp.value, uniforms.uWarpBox.value)
         setWarp(u.warp.seed)
       }
       if (u.terrain) {

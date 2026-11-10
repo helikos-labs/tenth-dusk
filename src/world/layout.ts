@@ -6,7 +6,7 @@
 // MARGIN round each, must lie in the province, or the spot is pulled toward the centre in steps (and, with `swing`,
 // turned round it to keep clear of the spots already taken there).
 import type { Hex } from './adapter.ts'
-import { INRADIUS, WARP, hexCenter, type Field, type Pt } from './field.ts'
+import { EDGE_DIR, INRADIUS, WARP, hexCenter, type Field, type Pt } from './field.ts'
 
 const ORIGIN: Pt = { x: 0, z: 0 }
 
@@ -41,7 +41,7 @@ export function inProvince(field: Field, h: Hex, x: number, z: number): boolean 
  */
 export function fits(field: Field, h: Hex, x: number, z: number, footprint: Pt[] = [ORIGIN], margin = MARGIN): boolean {
   const c = hexCenter(h.q, h.r)
-  const rim = Math.max(Math.abs(h.q), Math.abs(h.r), Math.abs(h.q + h.r)) >= field.radius
+  const rim = onRim(field, h)
   for (const f of footprint) {
     const px = x + f.x
     const pz = z + f.z
@@ -53,6 +53,9 @@ export function fits(field: Field, h: Hex, x: number, z: number, footprint: Pt[]
   }
   return true
 }
+
+/** True if hex h is on the board's outline: a neighbour is missing, so the coast can reach it. */
+export const onRim = (field: Field, h: Hex) => EDGE_DIR.some((d) => !field.board[`${h.q + d.q},${h.r + d.r}`])
 
 /** A spot already used in a hex (world point), and how far other things keep from it. */
 export interface Taken extends Pt {

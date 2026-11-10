@@ -1,48 +1,24 @@
 // Copied from helikos-labs/rift-and-root@7f00e23 src/board3d/terrainMesh.ts, adapted for Tenth Dusk.
-// Terrain geometry for the 3D board. ORGANIC CONCEPT: one triangle-lattice mesh over a round sea instead of one hexagon
-// per hex, so nothing in the geometry follows the grid. Every vertex takes its height and colour from the field
+// Terrain geometry for the 3D board. ORGANIC CONCEPT: one triangle-lattice mesh over the zone's bounds instead of one
+// hexagon per hex, so nothing in the geometry follows the grid. Every vertex takes its height and colour from the field
 // (field.ts), whose regions are domain-warped: borders meander, terrains blend across them (forest fringe into meadow,
 // sand and mud at the water, scree round a range's foot, rock on cliffs) and the coast has beaches, cliffs and islets.
 import * as THREE from 'three'
 import type { Terrain, WorldCell } from './adapter.ts'
-import { LAND, SQRT3, WATER_LEVEL, fbm, fray, ridged, smoothstep, type Field, type Probe } from './field.ts'
+import { LAND, SQRT3, WATER_LEVEL, fbm, fray, ridged, smoothstep, type Bounds, type Field, type Probe, type Rect } from './field.ts'
 import { flowersOf } from './flora.ts'
 import { slotOf } from './materials.ts'
+import { PALETTE as PAL } from './palette.ts'
 
-export const PLINTH_TOP = -0.75
-/** The sea reaches the tray's rim at this radius; the lattice runs a step past it, under the rim. */
-export const SEA_RADIUS = 9.5
-/** Lattice spacing (world units); a hex is 1 across its corners. */
-const STEP = 0.085
+/**
+ * The lattice (§15.3 detail rings, §15.6 budget). Spacing `STEP / detail` (world units; a hex is 2 across its corners)
+ * inside the zone's bounds grown by `FINE_MARGIN`, `COARSE` times that out in the wall ring, over a rectangle round the
+ * whole board grown by `OUTER_MARGIN` with corners rounded `CORNER`. `BUDGET` vertices at detail 1, scaling with the
+ * square of the detail (26k at 0.75); a board too big for it gets both steps coarsened evenly.
+ */
+export const LATTICE = { STEP: 0.085, COARSE: 2.5, FINE_MARGIN: 1, OUTER_MARGIN: 0.5, CORNER: 1.5, BUDGET: 46_000 }
 
 export const TERRAIN_ID: Record<Terrain, number> = { grassland: 0, forest: 1, mountain: 2, water: 3, blight: 4 }
-
-const col = (hex: string) => new THREE.Color(hex)
-const PAL = {
-  grass: col('#4f7d2f'),
-  grassLight: col('#76993f'),
-  grassDark: col('#335a22'),
-  grassDry: col('#948f4f'),
-  forest: col('#33502a'),
-  forestDark: col('#22381b'),
-  rock: col('#7b7266'),
-  rockDark: col('#4f483f'),
-  rockLight: col('#a49b8b'),
-  snow: col('#eaeff4'),
-  /** Wind-packed snow and drifts in hollows: a cold blue-grey. */
-  snowShade: col('#c3d0e0'),
-  scree: col('#8f8a7c'),
-  sand: col('#b9a274'),
-  wetSand: col('#8f7d58'),
-  mud: col('#5e5034'),
-  reedBank: col('#5f6e35'),
-  bed: col('#3e4d3c'),
-  heath: col('#56693a'),
-  heathDry: col('#7b7a4a'),
-  blight: col('#3a1c43'),
-  blightDark: col('#1f0d26'),
-  blightLight: col('#6a2f6e'),
-}
 
 /** Each hex's slot in the shaders' state texture (a fixed grid of axial coordinates, see materials.ts). */
 export function hexIndex(board: Record<string, WorldCell>): Map<string, number> {
@@ -153,7 +129,7 @@ function rockiness(pr: Probe, ny: number): number {
 
 export interface TerrainGeometry {
   surface: THREE.BufferGeometry
-  /** Water surface over the whole tray (lakes and sea), with the depth below each vertex. */
+  /** Water surface over the whole board (lakes and sea), with the depth below each vertex. */
   water: THREE.BufferGeometry | null
 }
 
@@ -164,7 +140,7 @@ export interface TerrainGeometry {
 // (`terrainGeometry`). When hexes change terrain, `patchTerrain` redoes only the vertices the change can reach
 // (worldBuild.ts works out which) and keeps the rest.
 
-/** A triangle lattice over the tray (see `lattice`) as typed arrays, with the triangles round each vertex. */
+/** A triangle lattice over the board (see `latticeFor`) as typed arrays, with the triangles round each vertex. */
 export interface Lattice {
   /** Ground-plane position of each vertex. */
   x: Float64Array
@@ -176,52 +152,216 @@ export interface Lattice {
   around: Uint32Array
 }
 
-/** A triangle lattice over the tray: vertices inside the sea's radius, triangles wound so normals face up. */
-function lattice(radius: number, step: number) {
+/** A triangle mesh under construction: points (x, z pairs) and triangles. */
+interface Sheet {
+  pts: number[]
+  tris: number[]
+}
+
+const grow = (r: Rect, by: number): Rect => ({ minX: r.minX - by, maxX: r.maxX + by, minZ: r.minZ - by, maxZ: r.maxZ + by })
+const within = (r: Rect, x: number, z: number) => x >= r.minX && x <= r.maxX && z >= r.minZ && z <= r.maxZ
+/** True if (x, z) lies in rectangle r with its corners rounded `k`. */
+function inRounded(r: Rect, k: number, x: number, z: number): boolean {
+  const dx = Math.max(r.minX + k - x, 0, x - (r.maxX - k))
+  const dz = Math.max(r.minZ + k - z, 0, z - (r.maxZ - k))
+  return within(r, x, z) && dx * dx + dz * dz <= k * k
+}
+
+/**
+ * A triangle lattice of spacing `step` laid from the corner of `box`, keeping the points `keep` accepts and the
+ * triangles whose three corners it keeps, wound so normals face up. Points ids start at `base`.
+ */
+function sheet(box: Rect, step: number, keep: (x: number, z: number) => boolean, base: number): Sheet {
   const rowH = (step * SQRT3) / 2
-  const rows = Math.ceil(radius / rowH) + 1
-  const cols = Math.ceil(radius / step) + 2
-  const ids = new Map<number, number>()
+  const rows = Math.floor((box.maxZ - box.minZ) / rowH) + 1
+  const cols = Math.floor((box.maxX - box.minX) / step) + 1
+  const ids = new Int32Array(rows * cols).fill(-1)
   const pts: number[] = []
-  const key = (j: number, i: number) => (j + rows) * (2 * cols + 3) + (i + cols)
-  for (let j = -rows; j <= rows; j++) {
-    const odd = ((j % 2) + 2) % 2 === 1
-    for (let i = -cols; i <= cols; i++) {
-      const x = i * step + (odd ? step / 2 : 0)
-      const z = j * rowH
-      if (Math.hypot(x, z) > radius + step) continue
-      ids.set(key(j, i), pts.length / 2)
+  for (let j = 0; j < rows; j++)
+    for (let i = 0; i < cols; i++) {
+      const x = box.minX + i * step + (j % 2 ? step / 2 : 0)
+      const z = box.minZ + j * rowH
+      if (!keep(x, z)) continue
+      ids[j * cols + i] = base + pts.length / 2
       pts.push(x, z)
     }
-  }
   const tris: number[] = []
-  const at = (j: number, i: number) => ids.get(key(j, i))
-  const tri = (a?: number, b?: number, c?: number) => {
-    if (a !== undefined && b !== undefined && c !== undefined) tris.push(a, b, c)
+  const at = (j: number, i: number) => (j < rows && i < cols ? ids[j * cols + i] : -1)
+  const tri = (a: number, b: number, c: number) => {
+    if (a >= 0 && b >= 0 && c >= 0) tris.push(a, b, c)
   }
-  for (let j = -rows; j < rows; j++) {
-    const odd = ((j % 2) + 2) % 2 === 1
-    for (let i = -cols; i < cols; i++) {
-      if (!odd) {
+  for (let j = 0; j + 1 < rows; j++)
+    for (let i = 0; i < cols; i++) {
+      if (j % 2 === 0) {
         tri(at(j, i), at(j + 1, i), at(j, i + 1))
-        tri(at(j, i + 1), at(j + 1, i), at(j + 1, i + 1))
+        if (i > 0) tri(at(j, i), at(j + 1, i - 1), at(j + 1, i))
       } else {
         tri(at(j, i), at(j + 1, i), at(j + 1, i + 1))
         tri(at(j, i), at(j + 1, i + 1), at(j, i + 1))
       }
     }
-  }
   return { pts, tris }
 }
 
-const lattices = new Map<number, Lattice>()
+/** Twice the signed area of triangle a, b, c on the ground, positive when its normal ((C − B) × (A − B)) faces up. */
+function upArea(p: number[], a: number, b: number, c: number): number {
+  const abx = p[a * 2] - p[b * 2]
+  const abz = p[a * 2 + 1] - p[b * 2 + 1]
+  const cbx = p[c * 2] - p[b * 2]
+  const cbz = p[c * 2 + 1] - p[b * 2 + 1]
+  return cbz * abx - cbx * abz
+}
 
-/** The lattice for a detail level (1 on desktops, less on phones: useWorld.ts), made once, as nothing else changes it. */
-export function latticeFor(detail: number): Lattice {
-  const step = STEP / Math.max(0.5, detail)
-  const known = lattices.get(step)
+/** The closed loops of a mesh's outline (edges on one triangle only), each as vertex ids in walking order. */
+function outlines(tris: number[]): number[][] {
+  const count = new Map<number, number>()
+  const id = (a: number, b: number) => (a < b ? a * 4194304 + b : b * 4194304 + a)
+  for (let t = 0; t < tris.length; t += 3)
+    for (let e = 0; e < 3; e++) {
+      const k = id(tris[t + e], tris[t + ((e + 1) % 3)])
+      count.set(k, (count.get(k) ?? 0) + 1)
+    }
+  const next = new Map<number, number>()
+  for (let t = 0; t < tris.length; t += 3)
+    for (let e = 0; e < 3; e++) {
+      const a = tris[t + e]
+      const b = tris[t + ((e + 1) % 3)]
+      if (count.get(id(a, b)) === 1) next.set(a, b)
+    }
+  const loops: number[][] = []
+  const seen = new Set<number>()
+  for (const start of next.keys()) {
+    if (seen.has(start)) continue
+    const loop: number[] = []
+    for (let v: number | undefined = start; v !== undefined && !seen.has(v); v = next.get(v)) {
+      seen.add(v)
+      loop.push(v)
+    }
+    loops.push(loop)
+  }
+  return loops
+}
+
+/**
+ * Stitches the gap between two nested loops round (cx, cz), `inner` (the fine sheet's outline) and `outer` (the coarse
+ * ring's hole), with triangles that each join neighbouring points: both loops are walked by angle round the centre and
+ * whichever's next point comes first is joined to the other's current one. Wound to face up.
+ */
+function stitch(p: number[], inner: number[], outer: number[], cx: number, cz: number, out: number[]) {
+  const ordered = (loop: number[]) => {
+    const ang = loop.map((v) => Math.atan2(p[v * 2 + 1] - cz, p[v * 2] - cx))
+    // Walk the loop with the angle rising, from its smallest angle.
+    let turn = 0
+    for (let i = 0; i < loop.length; i++) {
+      let d = ang[(i + 1) % loop.length] - ang[i]
+      if (d > Math.PI) d -= 2 * Math.PI
+      if (d < -Math.PI) d += 2 * Math.PI
+      turn += d
+    }
+    const ids = turn > 0 ? loop : [...loop].reverse()
+    const as = turn > 0 ? ang : [...ang].reverse()
+    let s0 = 0
+    for (let i = 1; i < as.length; i++) if (as[i] < as[s0]) s0 = i
+    const v = [...ids.slice(s0), ...ids.slice(0, s0)]
+    const a = [...as.slice(s0), ...as.slice(0, s0)]
+    for (let i = 1; i < a.length; i++) while (a[i] < a[i - 1]) a[i] += 2 * Math.PI
+    v.push(v[0])
+    a.push(a[0] + 2 * Math.PI)
+    return { v, a }
+  }
+  const A = ordered(inner)
+  const B = ordered(outer)
+  const face = (a: number, b: number, c: number) => {
+    if (upArea(p, a, b, c) >= 0) out.push(a, b, c)
+    else out.push(a, c, b)
+  }
+  let i = 0
+  let j = 0
+  const nA = A.v.length - 1
+  const nB = B.v.length - 1
+  while (i < nA || j < nB) {
+    if (j >= nB || (i < nA && A.a[i + 1] <= B.a[j + 1])) {
+      face(A.v[i], A.v[i + 1], B.v[j])
+      i++
+    } else {
+      face(A.v[i], B.v[j + 1], B.v[j])
+      j++
+    }
+  }
+}
+
+/**
+ * The lattice over `bounds` at spacing `step` (§15.3 detail rings): fine inside the zone's bounds grown by
+ * FINE_MARGIN, COARSE times coarser in the wall ring out to the board's rounded outline, the two stitched along the
+ * gap between them. A board whose wall ring is too thin for a coarse ring (or has none) is fine throughout.
+ */
+function lattice(bounds: Bounds, step: number): Sheet {
+  const L = LATTICE
+  const outer = grow(bounds, L.OUTER_MARGIN)
+  const inOuter = (x: number, z: number) => inRounded(outer, L.CORNER, x, z)
+  const fine = grow(bounds.inner, L.FINE_MARGIN)
+  const coarse = step * L.COARSE
+  const gap = coarse * 0.5
+  const hole = grow(fine, gap)
+  // The coarse ring must go all the way round, with room for a row of its own past the gap, and the fine sheet's
+  // corners must lie inside the rounded outline.
+  const ring =
+    hole.minX - outer.minX > coarse * 1.5 &&
+    outer.maxX - hole.maxX > coarse * 1.5 &&
+    hole.minZ - outer.minZ > coarse * 1.5 &&
+    outer.maxZ - hole.maxZ > coarse * 1.5 &&
+    [fine.minX, fine.maxX].every((x) => [fine.minZ, fine.maxZ].every((z) => inOuter(x, z)))
+  if (!ring) return sheet(outer, step, inOuter, 0)
+  const a = sheet(fine, step, () => true, 0)
+  const b = sheet(outer, coarse, (x, z) => inOuter(x, z) && !within(hole, x, z), a.pts.length / 2)
+  const pts = [...a.pts, ...b.pts]
+  const tris = [...a.tris, ...b.tris]
+  const cx = (fine.minX + fine.maxX) / 2
+  const cz = (fine.minZ + fine.maxZ) / 2
+  const inner = outlines(a.tris)
+  // The ring's outline is two loops, its rim and its hole: the hole is the one that stays nearer the middle.
+  const loops = outlines(b.tris)
+  const reach = (loop: number[]) => Math.max(...loop.map((v) => Math.hypot(pts[v * 2] - cx, pts[v * 2 + 1] - cz)))
+  if (inner.length !== 1 || loops.length !== 2) return sheet(outer, step, inOuter, 0)
+  stitch(pts, inner[0], reach(loops[0]) < reach(loops[1]) ? loops[0] : loops[1], cx, cz, tris)
+  return { pts, tris }
+}
+
+/** Drops points no triangle uses (a lattice's ragged edge leaves a few) and numbers the rest in order. */
+function prune(m: Sheet): Sheet {
+  const n = m.pts.length / 2
+  const used = new Uint8Array(n)
+  for (const v of m.tris) used[v] = 1
+  const map = new Int32Array(n).fill(-1)
+  const pts: number[] = []
+  for (let v = 0; v < n; v++) {
+    if (!used[v]) continue
+    map[v] = pts.length / 2
+    pts.push(m.pts[v * 2], m.pts[v * 2 + 1])
+  }
+  return { pts, tris: m.tris.map((v) => map[v]) }
+}
+
+const lattices = new Map<string, Lattice>()
+
+/**
+ * The lattice for a detail level (1 on desktops, less on phones: useWorld.ts) over a board's bounds, made once per
+ * board shape, as nothing else changes it. Its step is `LATTICE.STEP / detail`, coarsened evenly until the vertices
+ * fit the budget (§15.6).
+ */
+export function latticeFor(detail: number, bounds: Bounds): Lattice {
+  const d = Math.max(0.5, detail)
+  const k = `${d}|${[bounds.minX, bounds.maxX, bounds.minZ, bounds.maxZ, bounds.inner.minX, bounds.inner.maxX, bounds.inner.minZ, bounds.inner.maxZ].map((v) => v.toFixed(4)).join(',')}`
+  const known = lattices.get(k)
   if (known) return known
-  const { pts, tris } = lattice(SEA_RADIUS, step)
+  const budget = LATTICE.BUDGET * d * d
+  let step = LATTICE.STEP / d
+  let m = prune(lattice(bounds, step))
+  for (let i = 0; i < 20 && m.pts.length / 2 > budget; i++) {
+    step *= Math.sqrt(m.pts.length / 2 / budget) * 1.01
+    m = prune(lattice(bounds, step))
+  }
+  const { pts, tris } = m
   const n = pts.length / 2
   const x = new Float64Array(n)
   const z = new Float64Array(n)
@@ -237,7 +377,8 @@ export function latticeFor(detail: number): Lattice {
   const around = new Uint32Array(tris.length)
   for (let i = 0; i < tris.length; i++) around[next[tris[i]]++] = (i / 3) | 0
   const made: Lattice = { x, z, tris: Uint32Array.from(tris), aroundAt, around }
-  lattices.set(step, made)
+  if (lattices.size > 6) lattices.delete(lattices.keys().next().value!)
+  lattices.set(k, made)
   return made
 }
 
@@ -271,7 +412,7 @@ export interface TerrainBuild {
  * only), so the world worker can run it. `onProbe` sees every vertex's probe (worldBuild.ts notes where it reads).
  */
 export function buildTerrainArrays(field: Field, waterLevel: number, detail = 1, onProbe?: (v: number, pr: Probe) => void): TerrainBuild {
-  const lat = latticeFor(detail)
+  const lat = latticeFor(detail, field.bounds)
   const n = lat.x.length
   const a: TerrainArrays = {
     position: new Float32Array(n * 3),

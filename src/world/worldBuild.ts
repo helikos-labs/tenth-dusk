@@ -9,7 +9,7 @@
 // change in a game). When a hex changes terrain, only the border segments along its own six edges move, all within one
 // hex radius of its centre, so a probe can change only if it reads within 1 + 1.0 of that centre (FLIP_REACH). In
 // world units that is at most 2.46 from the centre, as the warp moves a point by less than WARP.max (0.46). Off the
-// board a point reads where the ray from the board's centre leaves the board, somewhere in its rim province, so it
+// board a point reads where the ray from the middle of the board's bounds leaves the board, somewhere in its rim province, so it
 // gets one hex radius of slack round that province's centre. A normal also reads its neighbours' heights, so the ring
 // of vertices round the reached ones is redone too (terrainMesh.ts patchTerrain).
 // The one exception is a terrain appearing on the board or vanishing from it (the first Blight), which moves the
@@ -17,7 +17,7 @@
 
 import type { WorldCell } from './adapter.ts'
 import { WATER_LEVEL, buildField, hexAt, hexCenter, warpSeedOf, type Field, type Probe } from './field.ts'
-import { warpData } from './materials.ts'
+import { warpBoxOf, warpData, type WarpBox } from './materials.ts'
 import { buildTerrainArrays, latticeFor, patchTerrain, type TerrainArrays, type TerrainBuild, type TerrainUpdate } from './terrainMesh.ts'
 import { PLANT_KINDS, joinPlants, placeIslets, placeProvince, readingOrder, type PlantLists, type PlantSets } from './vegetation.ts'
 
@@ -49,8 +49,8 @@ export interface WorldUpdate {
   terrain?: TerrainUpdate
   /** Every plant, when any province's plants changed. */
   plants?: PlantSets
-  /** The world's warp for the shaders (materials.ts `warpData`), with the first build of each world. */
-  warp?: { seed: number; data: Uint16Array }
+  /** The world's warp for the shaders (materials.ts `warpData`) over its box, with the first build of each world. */
+  warp?: { seed: number; data: Uint16Array; box: WarpBox }
   stats: WorldStats
 }
 
@@ -143,7 +143,7 @@ export class WorldBuilder {
 
   private full(board: Board, shape: string, t0: number): WorldUpdate {
     const field = buildField(board)
-    const n = latticeFor(this.detail).x.length
+    const n = latticeFor(this.detail, field.bounds).x.length
     const reads: Reads = { x: new Float32Array(n), z: new Float32Array(n), slack: new Int8Array(n) }
     const terrain = buildTerrainArrays(field, WATER_LEVEL, this.detail, (v, pr) => note(reads, v, pr))
     const cells = readingOrder(board)
@@ -156,7 +156,8 @@ export class WorldBuilder {
     this.provinces = new Map(cells.map((c) => [`${c.q},${c.r}`, placeProvince(field, c, this.detail)]))
     this.islets = placeIslets(field)
     // The warp changes only with the world (a terrain appearing keeps it), so it goes with a world's first build.
-    const warp = this.warpSent === field.seed ? undefined : { seed: field.seed, data: warpData(field.seed) }
+    const box = warpBoxOf(field.bounds)
+    const warp = this.warpSent === field.seed ? undefined : { seed: field.seed, data: warpData(field.seed, box), box }
     this.warpSent = field.seed
     return {
       full: true,

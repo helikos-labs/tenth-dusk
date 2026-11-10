@@ -9,7 +9,8 @@
 // the province's meandering border, and a faint ink line marks each border between two land provinces,
 // so provinces can be counted while the island still reads as one landscape.
 import * as THREE from 'three'
-import { makeWarp } from './field.ts'
+import type { WorldCell } from './adapter.ts'
+import { makeWarp, rimRay, type Bounds, type Rect } from './field.ts'
 
 /** Texels per hex in the state texture. */
 export const TEXELS = 2
@@ -69,30 +70,52 @@ float rr_cloud(vec2 p, float t) {
 }
 `
 
-/** The warp texture covers world x and z in [-WARP_EXTENT, WARP_EXTENT] (the whole tray) at WARP_TEXELS a side. */
-const WARP_EXTENT = 10
+/**
+ * The ground a warp texture covers (world units, from its corner minX, minZ) and its texels a side. A world's box is
+ * `warpBoxOf` its bounds; the default is Rift & Root's, x and z in [-10, 10] at WARP_TEXELS a side.
+ */
+export interface WarpBox {
+  minX: number
+  minZ: number
+  sizeX: number
+  sizeZ: number
+  w: number
+  h: number
+}
 export const WARP_TEXELS = 320
+const DEFAULT_WARP_BOX: WarpBox = { minX: -10, minZ: -10, sizeX: 20, sizeZ: 20, w: WARP_TEXELS, h: WARP_TEXELS }
+/** Texels per world unit, as Rift & Root had them, and the most a side may have. */
+const WARP_DENSITY = 16
+const WARP_MAX = 1024
+
+/** The warp box round a board's bounds, with a hex to spare past the lattice's edge. */
+export function warpBoxOf(b: Rect): WarpBox {
+  const minX = b.minX - 1.5
+  const minZ = b.minZ - 1.5
+  const sizeX = b.maxX - b.minX + 3
+  const sizeZ = b.maxZ - b.minZ + 3
+  return { minX, minZ, sizeX, sizeZ, w: Math.min(WARP_MAX, Math.ceil(sizeX * WARP_DENSITY)), h: Math.min(WARP_MAX, Math.ceil(sizeZ * WARP_DENSITY)) }
+}
 /** Warp textures by seed, the latest last; a few worlds' worth (a new game brings a new seed), the oldest freed. */
 const warpTextures = new Map<number, THREE.DataTexture>()
 const WARP_KEPT = 3
 
 /**
- * One world's warp (field.ts `makeWarp(seed)`) as displacements on a grid over the tray: x then z per texel, half
+ * One world's warp (field.ts `makeWarp(seed)`) as displacements on a grid over `box`: x then z per texel, half
  * floats. No three.js objects but the half-float maths, so the world worker bakes it with the world's first build
  * (worldBuild.ts) and the main thread only wraps it (`makeWarpTexture`).
  */
-export function warpData(seed: number): Uint16Array {
+export function warpData(seed: number, box: WarpBox = DEFAULT_WARP_BOX): Uint16Array {
   const warp = makeWarp(seed)
-  const n = WARP_TEXELS
-  const data = new Uint16Array(n * n * 2)
-  const step = (2 * WARP_EXTENT) / n
-  for (let j = 0; j < n; j++)
-    for (let i = 0; i < n; i++) {
-      const x = -WARP_EXTENT + (i + 0.5) * step
-      const z = -WARP_EXTENT + (j + 0.5) * step
+  const { w: nx, h: nz } = box
+  const data = new Uint16Array(nx * nz * 2)
+  for (let j = 0; j < nz; j++)
+    for (let i = 0; i < nx; i++) {
+      const x = box.minX + ((i + 0.5) * box.sizeX) / nx
+      const z = box.minZ + ((j + 0.5) * box.sizeZ) / nz
       const w = warp(x, z)
-      data[(j * n + i) * 2] = THREE.DataUtils.toHalfFloat(w.x - x)
-      data[(j * n + i) * 2 + 1] = THREE.DataUtils.toHalfFloat(w.z - z)
+      data[(j * nx + i) * 2] = THREE.DataUtils.toHalfFloat(w.x - x)
+      data[(j * nx + i) * 2 + 1] = THREE.DataUtils.toHalfFloat(w.z - z)
     }
   return data
 }
@@ -104,15 +127,16 @@ export function warpData(seed: number): Uint16Array {
  * an older one is disposed (its 400 KB on the GPU freed; three.js uploads it again if a board still draws with it). Between
  * texels it is interpolated, a few thousandths of a hex off the exact warp.
  */
-export function makeWarpTexture(seed: number, data?: Uint16Array): THREE.DataTexture {
+export function makeWarpTexture(seed: number, data?: Uint16Array, box: WarpBox = DEFAULT_WARP_BOX): THREE.DataTexture {
   const cached = warpTextures.get(seed)
   if (cached) {
     warpTextures.delete(seed)
     warpTextures.set(seed, cached)
     return cached
   }
-  const n = WARP_TEXELS
-  const tex = new THREE.DataTexture(data && data.length === n * n * 2 ? data : warpData(seed), n, n, THREE.RGFormat, THREE.HalfFloatType)
+  const tex = new THREE.DataTexture(data && data.length === box.w * box.h * 2 ? data : warpData(seed, box), box.w, box.h, THREE.RGFormat, THREE.HalfFloatType)
+  /** Where it lies on the ground, for the shaders' uWarpBox (`warpBoxUniform`). */
+  tex.userData.box = box
   tex.magFilter = THREE.LinearFilter
   tex.minFilter = THREE.LinearFilter
   tex.wrapS = tex.wrapT = THREE.ClampToEdgeWrapping
@@ -124,6 +148,34 @@ export function makeWarpTexture(seed: number, data?: Uint16Array): THREE.DataTex
     t.dispose()
   }
   return tex
+}
+
+/** The uWarpBox value for a warp texture: its box's corner and size (x, z, width, depth). */
+export function warpBoxUniform(tex: THREE.DataTexture, out = new THREE.Vector4()): THREE.Vector4 {
+  const b: WarpBox = tex.userData.box ?? DEFAULT_WARP_BOX
+  return out.set(b.minX, b.minZ, b.sizeX, b.sizeZ)
+}
+
+/**
+ * The board's shape for the shaders: `uRect` its offset rows and columns (min row, max row, min column, max column; a
+ * zone is a rectangle of them), and `uRim` the ray field.ts `toRim` follows off the board (`rimRay`: its centre x, z and
+ * the half-extents surely on the board).
+ */
+export function boardShape(board: Record<string, WorldCell>, bounds: Bounds): { rect: THREE.Vector4; rim: THREE.Vector4 } {
+  let r0 = Infinity
+  let r1 = -Infinity
+  let c0 = Infinity
+  let c1 = -Infinity
+  for (const c of Object.values(board)) {
+    const row = -c.r
+    const col = c.q - (row + (row & 1)) / 2
+    r0 = Math.min(r0, row)
+    r1 = Math.max(r1, row)
+    c0 = Math.min(c0, col)
+    c1 = Math.max(c1, col)
+  }
+  const ray = rimRay(bounds)
+  return { rect: new THREE.Vector4(r0, r1, c0, c1), rim: new THREE.Vector4(ray.cx, ray.cz, ray.hx, ray.hz) }
 }
 
 /** True once a world's warp texture is made. */
@@ -139,7 +191,7 @@ export function noWarpTexture(): THREE.DataTexture {
 }
 
 /**
- * The province lookup, in GLSL: the warp (from the warp texture) and field.ts's `hexAt`, then the hex's slot in the state
+ * The province lookup, in GLSL: the warp (from the warp texture over `uWarpBox`) and field.ts's `hexAt`, then the hex's slot in the state
  * texture. `rr_province(world xz, on land)` returns an RRProv:
  *   slot   the province's slot in the state texture (-1: none, the sea);
  *   local  the warped point relative to the hex centre;
@@ -152,12 +204,12 @@ export function noWarpTexture(): THREE.DataTexture {
  * distance keeps its width while it meanders. The board's outline is no border (the coast is). Off the board, land
  * belongs to the rim province its ray from the board's centre leaves through (field.ts `toRim`), so the borders between
  * rim provinces run on out along the rays through the outline's inner corners; the sea belongs to none (slot -1).
- * `uBoardR` is the board's radius in hexes.
+ * `uRect` and `uRim` are the board's shape (`boardShape`).
  */
 const WARP_GLSL = /* glsl */ `
 // The warp's displacement at a world point (the point's province is the hex under p + rr_disp(p)).
 vec2 rr_disp(vec2 p) {
-  return texture2D(uWarp, (p + ${WARP_EXTENT}.0) / ${2 * WARP_EXTENT}.0).rg;
+  return texture2D(uWarp, (p - uWarpBox.xy) / uWarpBox.zw).rg;
 }
 vec2 rr_hexRound(vec2 w) {
   float qf = 0.57735027 * w.x - w.y / 3.0;
@@ -173,8 +225,12 @@ vec2 rr_hexRound(vec2 w) {
   else if (dr > ds) r = -q - s;
   return vec2(q, r);
 }
-float rr_hexDist(vec2 h) { return max(max(abs(h.x), abs(h.y)), abs(h.x + h.y)); }
-bool rr_on(vec2 h) { return rr_hexDist(h) <= uBoardR + 0.5; }
+// On the board: the hex's offset row and column (rules/hex.ts toOffset) inside uRect.
+bool rr_on(vec2 h) {
+  float row = -h.y;
+  float col = h.x - (row + mod(row, 2.0)) * 0.5;
+  return row > uRect.x - 0.5 && row < uRect.y + 0.5 && col > uRect.z - 0.5 && col < uRect.w + 0.5;
+}
 float rr_slotOf(vec2 h) {
   return (abs(h.x) > ${SLOT_OFFSET}.0 || abs(h.y) > ${SLOT_OFFSET}.0) ? -1.0 : (h.y + ${SLOT_OFFSET}.0) * ${SLOT_WIDTH}.0 + (h.x + ${SLOT_OFFSET}.0);
 }
@@ -194,17 +250,15 @@ RRProv rr_province(vec2 world, bool land) {
   if (off) {
     if (!land) return P;
     // The rim province whose outer edge the ray from the centre leaves through (field.ts toRim).
-    float qf = 0.57735027 * w.x - w.y / 3.0;
-    float rf = w.y * (2.0 / 3.0);
-    float m = max(max(abs(qf), abs(rf)), abs(qf + rf));
-    float lo = min(1.0, (uBoardR - 0.01) / max(m, 1e-6));
+    vec2 rd = w - uRim.xy;
+    float lo = min(1.0, min(uRim.z / max(abs(rd.x), 1e-6), uRim.w / max(abs(rd.y), 1e-6)));
     float hi = 1.0;
     for (int i = 0; i < 10; i++) {
       float mid = 0.5 * (lo + hi);
-      if (rr_on(rr_hexRound(w * mid))) lo = mid;
+      if (rr_on(rr_hexRound(uRim.xy + rd * mid))) lo = mid;
       else hi = mid;
     }
-    h = rr_hexRound(w * lo);
+    h = rr_hexRound(uRim.xy + rd * lo);
   }
   // How the warp stretches a distance across a line with normal n (warped space): |J^T n|.
   vec2 jx = vec2(1.0, 0.0) + (rr_disp(world + vec2(0.04, 0.0)) - dsp) * 25.0;
@@ -238,9 +292,9 @@ RRProv rr_province(vec2 world, bool land) {
       bool a = rr_on(h + dirs[(i + 5) % 6]);
       if (a == rr_on(h + dirs[i])) continue;
       vec2 v = ctr + corners[i];
-      vec2 dir = normalize(v);
+      vec2 dir = normalize(v - uRim.xy);
       vec2 perp = vec2(-dir.y, dir.x);
-      float dr = dot(w, dir) > length(v) ? abs(dot(w, perp)) : length(w - v);
+      float dr = dot(w - uRim.xy, dir) > length(v - uRim.xy) ? abs(dot(w - uRim.xy, perp)) : length(w - v);
       float dw = dr / max(length(vec2(dot(perp, jx), dot(perp, jz))), 0.25);
       P.d = min(P.d, dw);
       P.ink = min(P.ink, dw < 0.3 && (P.lake > 0.5 || rr_lake(h + (a ? dirs[(i + 5) % 6] : dirs[i]))) ? 0.3 : dw);
@@ -255,8 +309,12 @@ export interface TerrainUniforms {
   uState: { value: THREE.DataTexture }
   uStateSize: { value: number }
   uHint: { value: THREE.Color }
-  uBoardR: { value: number }
+  /** The board's shape (`boardShape`). */
+  uRect: { value: THREE.Vector4 }
+  uRim: { value: THREE.Vector4 }
   uWarp: { value: THREE.DataTexture }
+  /** Where the warp texture lies (`warpBoxUniform`). */
+  uWarpBox: { value: THREE.Vector4 }
   /** Direction towards the sun (world space, normalised): snow in its shade turns blue. */
   uSun: { value: THREE.Vector3 }
 }
@@ -293,8 +351,10 @@ uniform float uTime;
 uniform sampler2D uState;
 uniform float uStateSize;
 uniform vec3 uHint;
-uniform float uBoardR;
+uniform vec4 uRect;
+uniform vec4 uRim;
 uniform sampler2D uWarp;
+uniform vec4 uWarpBox;
 uniform vec3 uSun;
 varying vec3 vWPos;
 varying float vRock;
@@ -388,7 +448,7 @@ if (rr_s0.g > 0.25) {
 }`,
       )
   }
-  mat.customProgramCacheKey = () => 'rr-terrain-organic-3'
+  mat.customProgramCacheKey = () => 'td-terrain-organic-1'
   return mat
 }
 
@@ -398,16 +458,21 @@ export interface WaterUniforms {
   uStateSize: { value: number }
   uHint: { value: THREE.Color }
   uSun: { value: THREE.Vector3 }
-  uBoardR: { value: number }
+  uRect: { value: THREE.Vector4 }
+  uRim: { value: THREE.Vector4 }
   uWarp: { value: THREE.DataTexture }
+  uWarpBox: { value: THREE.Vector4 }
 }
 
 export function makeWaterMaterial(uniforms: WaterUniforms): THREE.ShaderMaterial {
   return new THREE.ShaderMaterial({
-    uniforms: uniforms as unknown as Record<string, THREE.IUniform>,
+    // The scene's fog too (three.js fills these from scene.fog), so the water fades with the land round it.
+    uniforms: { ...(uniforms as unknown as Record<string, THREE.IUniform>), ...THREE.UniformsUtils.clone(THREE.UniformsLib.fog) },
+    fog: true,
     transparent: true,
     depthWrite: false,
     vertexShader: /* glsl */ `
+#include <fog_pars_vertex>
 attribute float aDepth;
 varying vec3 vWPos;
 varying float vDepth;
@@ -418,16 +483,21 @@ void main() {
   vec4 w = modelMatrix * vec4(p, 1.0);
   vWPos = w.xyz;
   vDepth = aDepth;
-  gl_Position = projectionMatrix * viewMatrix * w;
+  vec4 mvPosition = viewMatrix * w;
+  gl_Position = projectionMatrix * mvPosition;
+  #include <fog_vertex>
 }`,
     fragmentShader: /* glsl */ `
+#include <fog_pars_fragment>
 uniform float uTime;
 uniform sampler2D uState;
 uniform float uStateSize;
 uniform vec3 uHint;
 uniform vec3 uSun;
-uniform float uBoardR;
+uniform vec4 uRect;
+uniform vec4 uRim;
 uniform sampler2D uWarp;
+uniform vec4 uWarpBox;
 varying vec3 vWPos;
 varying float vDepth;
 ${NOISE_GLSL}
@@ -469,6 +539,7 @@ void main() {
   gl_FragColor = vec4(col, clamp(alpha, 0.0, 1.0));
   #include <tonemapping_fragment>
   #include <colorspace_fragment>
+  #include <fog_fragment>
 }`,
   })
 }

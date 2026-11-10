@@ -4,13 +4,13 @@
 // exactly) while redoing only what the change can reach; a terrain appearing rebuilds in full; and the main thread's
 // client (worldClient.ts) and appliers (terrainMesh.ts, vegetation.ts) must show only the latest board.
 //
-// Until the lattice follows the zone's bounds (it is still a disc round the origin), the mesh covers only the valley's
-// south-west corner, so the inland changes are taken nearest the origin, where they reach the ground.
+// The lattice covers the board's bounds, so every flip, on the rim too, reaches the ground: each step checks that it
+// probed vertices again.
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import type * as THREE from 'three'
 import type { Terrain, WorldCell } from '../src/world/adapter.ts'
-import { EDGE_DIR, hexCenter } from '../src/world/field.ts'
+import { EDGE_DIR } from '../src/world/field.ts'
 import { WARP_TEXELS, hasWarpTexture, makeWarpTexture } from '../src/world/materials.ts'
 import { applyTerrain } from '../src/world/terrainMesh.ts'
 import { PLANT_KINDS, PlantMeshes } from '../src/world/vegetation.ts'
@@ -25,11 +25,6 @@ type Board = Record<string, WorldCell>
 const key = (c: WorldCell) => `${c.q},${c.r}`
 /** True if the hex is on the board's outline (a neighbour is missing). */
 const onRim = (b: Board, c: WorldCell) => EDGE_DIR.some((d) => !b[`${c.q + d.q},${c.r + d.r}`])
-/** How far the hex's centre lies from the origin, where the mesh is. */
-const fromOrigin = (c: WorldCell) => {
-  const p = hexCenter(c.q, c.r)
-  return Math.hypot(p.x, p.z)
-}
 const withTerrain = (b: Board, c: WorldCell, terrain: Terrain): Board => ({ ...b, [key(c)]: { ...b[key(c)], terrain } })
 const withLandmark = (b: Board, c: WorldCell): Board => ({ ...b, [key(c)]: { ...b[key(c)], landmark: 'hamlet' } })
 const without = (b: Board, c: WorldCell): Board => ({ ...b, [key(c)]: { ...b[key(c)], landmark: undefined } })
@@ -38,11 +33,8 @@ const land = (b: Board) =>
   Object.values(b)
     .filter((c) => c.terrain !== 'water' && c.terrain !== 'mountain')
     .sort((a, z) => a.r - z.r || a.q - z.q)
-/** Land off the outline, nearest the origin first. */
-const inlandOf = (b: Board) =>
-  land(b)
-    .filter((c) => !onRim(b, c))
-    .sort((a, z) => fromOrigin(a) - fromOrigin(z))
+/** Land off the outline, in reading order. */
+const inlandOf = (b: Board) => land(b).filter((c) => !onRim(b, c))
 const next: Record<string, Terrain> = { grassland: 'forest', forest: 'blight', blight: 'grassland' }
 
 /** The world the main thread shows after `shown` equals a full build of the same board. */
@@ -86,6 +78,7 @@ test('updates after flips, on the rim and inland, and new Landmarks equal a full
       if (i === 3) board = without(board, inland[0])
       const u = live.build(board)
       assert.equal(u.full, false, `VALLEY: step ${i} needed no full build`)
+      assert.ok(u.stats.probed > 0, `VALLEY at ${detail} step ${i} (${key(c)}): the flip reached no vertex`)
       shown = mergeUpdates(shown, u)
       assertSameWorld(shown, new WorldBuilder(detail).build(board), `VALLEY at ${detail} step ${i} (${key(c)})`)
     })
@@ -105,6 +98,7 @@ test('beside a lake that opens into the sea, updates still equal a full rebuild'
     board = withTerrain(board, c, next[board[key(c)].terrain])
     const u = live.build(board)
     assert.equal(u.full, false)
+    assert.ok(u.stats.probed > 0, `beside the rim lake ${key(lake)}: ${key(c)} reached no vertex`)
     shown = mergeUpdates(shown, u)
     assertSameWorld(shown, new WorldBuilder(DETAIL).build(board), `beside the rim lake ${key(lake)}: ${key(c)}`)
   }

@@ -6,14 +6,15 @@
 // ORGANIC CONCEPT: plants follow the warped provinces, not hexagons. Each hex scatters candidates over a disc round its
 // centre and keeps those its province owns, so woods fill their meandering outline; trees thin out raggedly towards a
 // wood's edge and spill into the meadow as a fringe of young trees and bushes; reeds stand in the lake margins; boulders
-// fan out round a range's foot; the islets off the coast get rocks and a few pines.
+// fan out round a range's foot; the islets off a sea wall get rocks and a few pines.
 import * as THREE from 'three'
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js'
 import type { WorldCell } from './adapter.ts'
-import { WARP, WATER_LEVEL, fbm, fray, hash01, hexCenter, smoothstep, type Field, type Probe } from './field.ts'
+import { SQRT3, WARP, WATER_LEVEL, fbm, fray, hash01, hexCenter, smoothstep, type Field, type Probe, type Rect } from './field.ts'
 import { flowersOf } from './flora.ts'
+import { onRim } from './layout.ts'
 import { castShadows, windPatch } from './materials.ts'
-import { SEA_RADIUS } from './terrainMesh.ts'
+import { LATTICE } from './terrainMesh.ts'
 
 /** Hex centres keep a clearing this wide for the hero and Landmarks. */
 export const CLEARING = 0.34
@@ -259,7 +260,7 @@ export function placeProvince(field: Field, cell: WorldCell, detail = 1): PlantL
   const rand = rng(cell.q, cell.r, 1)
   const busy = !!cell.landmark
   const inner = busy ? CLEARING + 0.1 : CLEARING
-  const rim = Math.max(Math.abs(cell.q), Math.abs(cell.r), Math.abs(cell.q + cell.r)) === field.radius
+  const rim = onRim(field, cell)
   const reach = rim ? RIM_REACH : REACH
   /** More tries over a rim province's larger disc keep the same density. */
   const more = (k: number) => Math.round(k * (rim ? (RIM_REACH / REACH) ** 2 * 0.75 : 1))
@@ -387,15 +388,49 @@ export function placeProvince(field: Field, cell: WorldCell, detail = 1): PlantL
   return out
 }
 
+/** Islet candidates per unit of ground (Rift & Root's 2600 over its ring of sea). */
+const ISLET_DENSITY = 18
+
 /**
- * Off the board: rocks and a few wind-bent pines on the islets and capes, and boulders in the shallows under cliffs.
- * They stand outside every province, where nothing changes in a game, so a world places them once.
+ * The bands along the sides of the bounds whose outermost hexes are all water (a sea wall), from inside the board's
+ * notched outline out to the lattice's edge. The walls of peaks get none: they stand on the Hush.
+ */
+export function seaSides(field: Field): Rect[] {
+  const b = field.bounds
+  const cells = Object.values(field.board)
+  const out = LATTICE.OUTER_MARGIN
+  const sides: { at: (x: number, z: number) => boolean; band: Rect }[] = [
+    { at: (x) => x <= b.minX + SQRT3 + 0.01, band: { minX: b.minX - out, maxX: b.minX + 1.5, minZ: b.minZ - out, maxZ: b.maxZ + out } },
+    { at: (x) => x >= b.maxX - SQRT3 - 0.01, band: { minX: b.maxX - 1.5, maxX: b.maxX + out, minZ: b.minZ - out, maxZ: b.maxZ + out } },
+    { at: (_x, z) => z <= b.minZ + 1.01, band: { minX: b.minX - out, maxX: b.maxX + out, minZ: b.minZ - out, maxZ: b.minZ + 1.5 } },
+    { at: (_x, z) => z >= b.maxZ - 1.01, band: { minX: b.minX - out, maxX: b.maxX + out, minZ: b.maxZ - 1.5, maxZ: b.maxZ + out } },
+  ]
+  return sides
+    .filter((s) => {
+      const edge = cells.filter((c) => {
+        const p = hexCenter(c.q, c.r)
+        return s.at(p.x, p.z)
+      })
+      return edge.length > 0 && edge.every((c) => c.terrain === 'water')
+    })
+    .map((s) => s.band)
+}
+
+/**
+ * Off the board along its sea walls (`seaSides`): rocks and a few wind-bent pines on the islets and capes, and
+ * boulders in the shallows under cliffs. They stand outside every province, where nothing changes in a game, so a world
+ * places them once.
  */
 export function placeIslets(field: Field): PlantLists {
   const out = emptyLists()
   const rand = rng(97, -41, 3)
-  for (let i = 0; i < 2600; i++) {
-    const p = discPoint(rand, 6.2, SEA_RADIUS - 0.3)
+  // Candidates over each sea band, by area.
+  const spots: { x: number; z: number }[] = []
+  for (const b of seaSides(field)) {
+    const n = Math.round((b.maxX - b.minX) * (b.maxZ - b.minZ) * ISLET_DENSITY)
+    for (let i = 0; i < n; i++) spots.push({ x: b.minX + rand() * (b.maxX - b.minX), z: b.minZ + rand() * (b.maxZ - b.minZ) })
+  }
+  for (const p of spots) {
     if (field.provinceAt(p.x, p.z)) continue
     const pr = field.probe(p.x, p.z)
     const above = pr.height - WATER_LEVEL

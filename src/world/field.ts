@@ -6,7 +6,8 @@
 //
 // ORGANIC CONCEPT: the engine keeps its hexes, but the world on screen does not show them. A world point belongs to the
 // hex under its *warped* position (`warp`), so every border meanders: ragged forest edges, irregular shores, ranges with
-// crests instead of hexagonal blocks. Off the board lies the sea, with a coast that has beaches, cliffs and islets.
+// crests instead of hexagonal blocks. Off the board lies the sea, with a coast that has beaches, cliffs, and islets off a
+// sea wall.
 
 import type { Terrain, WorldCell } from './adapter.ts'
 
@@ -438,8 +439,42 @@ export interface Field {
   shoreDistance(x: number, z: number): number
   height(x: number, z: number): number
   normal(x: number, z: number): [number, number, number]
-  /** The board's radius in hexes (the world is a hexagon of hexes). */
-  radius: number
+  /** The board's extent on the ground, wall ring included, and the zone's inside it (`boundsOf`). */
+  bounds: Bounds
+}
+
+/** A rectangle on the ground (world units). */
+export interface Rect {
+  minX: number
+  maxX: number
+  minZ: number
+  maxZ: number
+}
+
+/** The ground the board covers: every hex whole (corners included), and `inner`, the same for the non-wall hexes. */
+export interface Bounds extends Rect {
+  inner: Rect
+}
+
+/** The rectangle round the hexes `cells`, corners included (a pointy-top hex is √3 wide and 2 tall). */
+function rectOf(cells: WorldCell[]): Rect {
+  const r: Rect = { minX: Infinity, maxX: -Infinity, minZ: Infinity, maxZ: -Infinity }
+  for (const c of cells) {
+    const p = hexCenter(c.q, c.r)
+    r.minX = Math.min(r.minX, p.x - INRADIUS)
+    r.maxX = Math.max(r.maxX, p.x + INRADIUS)
+    r.minZ = Math.min(r.minZ, p.z - 1)
+    r.maxZ = Math.max(r.maxZ, p.z + 1)
+  }
+  return r
+}
+
+/** The board's bounds: round all its hexes, and (`inner`) round those that are not wall (all of them if every one is). */
+export function boundsOf(board: Record<string, WorldCell>): Bounds {
+  const cells = Object.values(board)
+  if (!cells.length) return { minX: 0, maxX: 0, minZ: 0, maxZ: 0, inner: { minX: 0, maxX: 0, minZ: 0, maxZ: 0 } }
+  const zone = cells.filter((c) => !c.wall)
+  return { ...rectOf(cells), inner: rectOf(zone.length ? zone : cells) }
 }
 
 /** Inverse of the standard normal CDF (Acklam's rational approximation, relative error below 1.2e-9). */
@@ -488,15 +523,20 @@ export function buildField(board: Record<string, WorldCell>, seed = warpSeedOf(b
   const sx = lattice(seed | 0, 3, 5) * 503
   const sz = lattice(seed | 0, 7, 9) * 509
   const cells = Object.values(board)
-  const radius = Math.max(0, ...cells.map((c) => Math.max(Math.abs(c.q), Math.abs(c.r), Math.abs(c.q + c.r))))
-  const G = 2 * radius + 16
-  const grid: (WorldCell | undefined)[] = new Array(G * G)
+  const bounds = boundsOf(board)
+  // The hexes in a grid over the board's axial range, with room round it (lookups reach a few hexes off the board).
+  const PAD = 8
+  const q0 = Math.min(0, ...cells.map((c) => c.q)) - PAD
+  const r0 = Math.min(0, ...cells.map((c) => c.r)) - PAD
+  const GQ = Math.max(0, ...cells.map((c) => c.q)) + PAD + 1 - q0
+  const GR = Math.max(0, ...cells.map((c) => c.r)) + PAD + 1 - r0
+  const grid: (WorldCell | undefined)[] = new Array(GQ * GR)
   const at = (q: number, r: number): WorldCell | undefined => {
-    const i = q + G / 2
-    const j = r + G / 2
-    return i < 0 || j < 0 || i >= G || j >= G ? undefined : grid[j * G + i]
+    const i = q - q0
+    const j = r - r0
+    return i < 0 || j < 0 || i >= GQ || j >= GR ? undefined : grid[j * GQ + i]
   }
-  for (const c of cells) grid[(c.r + G / 2) * G + (c.q + G / 2)] = c
+  for (const c of cells) grid[(c.r - r0) * GQ + (c.q - q0)] = c
 
   // Region borders: edges between two terrains. The board's outline is no border (the coast is), so a terrain on the
   // rim runs on to the sea.
@@ -608,24 +648,25 @@ export function buildField(board: Record<string, WorldCell>, seed = warpSeedOf(b
     const blend = raw > 0 ? smoothstep(0.05, 0.8, raw) : smoothstep(0.2, 1.6, -raw)
     return raw / (k + (COAST_SLOPE - k) * blend)
   }
+  const rim = rimRay(bounds)
   /**
-   * Where the ray from the board's centre through an off-board (warped) point leaves the board: the land beyond the
-   * outline belongs to that rim province and reads its terrain there, so the strip continues the rim smoothly (the
-   * point on the outline maps to itself). Bisection between a scale surely on the board and 1; the shader does the same.
+   * Where the ray from the middle of the board's bounds through an off-board (warped) point leaves the board: the land
+   * beyond the outline belongs to that rim province and reads its terrain there, so the strip continues the rim
+   * smoothly (the point on the outline maps to itself). Bisection between a scale surely on the board (`rimRay`) and
+   * 1; the shader does the same.
    */
   const toRim = (w: Pt): Pt => {
-    const qf = (SQRT3 / 3) * w.x - w.z / 3
-    const rf = (2 / 3) * w.z
-    const m = Math.max(Math.abs(qf), Math.abs(rf), Math.abs(qf + rf))
-    let lo = Math.min(1, (radius - 0.01) / Math.max(m, 1e-9))
+    const dx = w.x - rim.cx
+    const dz = w.z - rim.cz
+    let lo = rim.sure(dx, dz)
     let hi = 1
     for (let i = 0; i < 12; i++) {
       const mid = (lo + hi) / 2
-      const h = hexAt(w.x * mid, w.z * mid)
+      const h = hexAt(rim.cx + dx * mid, rim.cz + dz * mid)
       if (at(h.q, h.r)) lo = mid
       else hi = mid
     }
-    return { x: w.x * lo, z: w.z * lo }
+    return { x: rim.cx + dx * lo, z: rim.cz + dz * lo }
   }
   const nearestRim = (w: Pt): WorldCell | null => {
     const r = toRim(w)
@@ -676,7 +717,9 @@ export function buildField(board: Record<string, WorldCell>, seed = warpSeedOf(b
       h += (fbm(x * 1.7, z * 1.7, 3, 2) - 0.5) * 0.06 * smoothstep(0.15, 0.5, d)
       // Islets and skerries offshore: rocky knolls rising out of the shelf, with water between them and the beach (an
       // islet that touched it would join it as a broad sand spit).
-      const isle = smoothstep(0.62, 0.74, fbm((x + sx) * 0.55, (z + sz) * 0.55, 61, 3)) * smoothstep(0.3, 0.55, d) * (1 - smoothstep(0.9, 1.35, d))
+      // Only off a sea wall (the rim province is water): the walls of peaks stand on the Hush, not on islands.
+      const isle =
+        smoothstep(0.62, 0.74, fbm((x + sx) * 0.55, (z + sz) * 0.55, 61, 3)) * smoothstep(0.3, 0.55, d) * (1 - smoothstep(0.9, 1.35, d)) * smoothstep(0, 0.4, sd.water)
       const top = 0.08 + 0.26 * ridged(x * 2.2, z * 2.2, 62, 2)
       h += (top - h) * isle
       // A lake on the rim opens into the sea: its basin carries on (no sandbar where the two meet).
@@ -749,5 +792,21 @@ export function buildField(board: Record<string, WorldCell>, seed = warpSeedOf(b
     return [nx / l, ny / l, nz / l]
   }
 
-  return { board, seed, warp, probe, provinceAt, terrainAt, depthIn, shoreDistance, height, normal, radius }
+  return { board, seed, warp, probe, provinceAt, terrainAt, depthIn, shoreDistance, height, normal, bounds }
 }
+
+/**
+ * The ray toRim follows, for the field and the shader alike: from the middle of the bounds (cx, cz), and `sure`, the
+ * share of an offset (dx, dz) from there that surely stays on the board, inside the bounds by RIM_SURE on both axes
+ * (the outline's teeth and the corners between pointy tops reach in less than that).
+ */
+export function rimRay(b: Rect) {
+  const cx = (b.minX + b.maxX) / 2
+  const cz = (b.minZ + b.maxZ) / 2
+  const hx = Math.max(0, (b.maxX - b.minX) / 2 - RIM_SURE)
+  const hz = Math.max(0, (b.maxZ - b.minZ) / 2 - RIM_SURE)
+  const sure = (dx: number, dz: number) => Math.min(1, hx / Math.max(Math.abs(dx), 1e-9), hz / Math.max(Math.abs(dz), 1e-9))
+  return { cx, cz, hx, hz, sure }
+}
+/** How far inside the bounds a point surely lies on the board: past the outline's deepest notch (√3 at the side). */
+export const RIM_SURE = 2

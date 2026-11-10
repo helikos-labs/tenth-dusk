@@ -185,8 +185,11 @@ export function roadPlan(field: Field, board: Record<string, WorldCell>): RoadPl
     const lean = radial.x * back.x + radial.z * back.z < 0 ? 1 : ROAD.sharp
     return unit(radial.x + (flow.x - radial.x) * lean, radial.z + (flow.z - radial.z) * lean)
   }
-  /** A road ending in the open (a road hex with one link): its ribbon tapers off instead of stopping square. */
-  const deadEnd = (c: WorldCell) => (linked.get(k(c)) ?? []).length === 1
+  /**
+   * A road ending in the open (a road hex with one link and no Landmark to end at): its ribbon tapers off instead of
+   * stopping square.
+   */
+  const deadEnd = (c: WorldCell) => (linked.get(k(c)) ?? []).length === 1 && !c.landmark
 
   for (const l of links.values()) {
     const { a, b } = l

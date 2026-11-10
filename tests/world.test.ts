@@ -30,12 +30,7 @@ function withLoneMountains(board: Board): Board {
   return out
 }
 
-/**
- * True if world point (x, z) lies in a province of the board itself. Off the board the field reads the rim province
- * where the ray from the origin leaves the board (field.ts toRim), which assumes a hexagonal board round the origin;
- * the valley is not one, so its strip off the board does not continue the rim until the world follows the zone's
- * bounds. Checks that cross the board's outline skip those points.
- */
+/** True if world point (x, z) lies in a province of the board itself (the summit checks look only there). */
 const onBoard = (f: Field, board: Board, x: number, z: number) => {
   const w = f.warp(x, z)
   const h = hexAt(w.x, w.z)
@@ -192,7 +187,8 @@ test('heights are continuous everywhere on the board: across warped borders, at 
   const end = mid.reach + 1
   let worst = 0
   // Chords across the whole board; a step that jumps is bisected down to a hair's width, where a continuous height can
-  // no longer jump (the steepest cliff is far below 1 per 1e-9). Steps off the board are skipped (see onBoard).
+  // no longer jump (the steepest cliff is far below 1 per 1e-9). The chords run on past the outline, through the
+  // strip off the board, where the field reads the rim province the ray from the bounds' middle leaves through.
   for (let k = 0; k < 16; k++) {
     const a = (k / 16) * Math.PI
     const off = ((k % 4) - 1.5) * 1.3
@@ -200,7 +196,7 @@ test('heights are continuous everywhere on the board: across warped borders, at 
     const dz = Math.sin(a)
     const x = (t: number) => mid.x - dz * off + dx * t
     const z = (t: number) => mid.z + dx * off + dz * t
-    const at = (t: number) => (onBoard(f, VALLEY, x(t), z(t)) ? f.height(x(t), z(t)) : NaN)
+    const at = (t: number) => f.height(x(t), z(t))
     let prev = at(-end)
     for (let t = 0.01 - end; t <= end; t += 0.01) {
       const h = at(t)

@@ -22,3 +22,6 @@ dist-ssr
 .idea
 .DS_Store
 *.sw?
+
+# Smoke test screenshots
+tests/e2e/out/
