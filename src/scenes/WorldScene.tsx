@@ -554,7 +554,7 @@ function Scene({ world, client, run, preview, onTap, onReady }: SceneProps) {
             matrixAutoUpdate={false}
           />
         )}
-        {terrain?.water && <mesh geometry={terrain.water} material={materials.water} renderOrder={2} matrixAutoUpdate={false} />}
+        {terrain?.water && <mesh geometry={terrain.water} material={materials.water} renderOrder={2} visible={!PERF_OFF.has('water')} matrixAutoUpdate={false} />}
         <primitive object={plants.group} visible={!PERF_OFF.has('plants')} dispose={null} />
         <primitive object={roads} dispose={null} />
         {landmarks.map((l) => (

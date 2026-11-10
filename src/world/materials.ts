@@ -14,6 +14,7 @@ import { CHAPTER1 } from '../data/book1.ts'
 import { toAxial } from '../rules/hex.ts'
 import { WATER_LEVEL, makeWarp, rimRay, type Bounds, type Rect } from './field.ts'
 import { PALETTE } from './palette.ts'
+import { PERF_GLSL } from '../testHooks.ts'
 
 /** Texels per hex in the state texture. */
 export const TEXELS = 3
@@ -233,6 +234,7 @@ export function noWarpTexture(): THREE.DataTexture {
  * `uRect` and `uRim` are the board's shape (`boardShape`).
  */
 export const WARP_GLSL = /* glsl */ `
+${PERF_GLSL}
 // The warp's displacement at a world point (the point's province is the hex under p + rr_disp(p)).
 vec2 rr_disp(vec2 p) {
   return texture2D(uWarp, (p - uWarpBox.xy) / uWarpBox.zw).rg;
@@ -313,6 +315,7 @@ RRProv rr_province(vec2 world, bool land) {
   vec2 dirs[6] = vec2[6](vec2(1.0, -1.0), vec2(1.0, 0.0), vec2(0.0, 1.0), vec2(-1.0, 1.0), vec2(-1.0, 0.0), vec2(0.0, -1.0));
   vec2 norms[6] = vec2[6](vec2(0.5, -0.8660254), vec2(1.0, 0.0), vec2(0.5, 0.8660254), vec2(-0.5, 0.8660254), vec2(-1.0, 0.0), vec2(-0.5, -0.8660254));
   vec2 corners[6] = vec2[6](vec2(0.0, -1.0), vec2(0.8660254, -0.5), vec2(0.8660254, 0.5), vec2(0.0, 1.0), vec2(-0.8660254, 0.5), vec2(-0.8660254, -0.5));
+#ifndef TD_OFF_BORDER
   bool rim = false;
   for (int i = 0; i < 6; i++) {
     vec2 n = norms[i];
@@ -345,6 +348,7 @@ RRProv rr_province(vec2 world, bool land) {
       P.ink = min(P.ink, dw < 0.3 && (P.lake > 0.5 || rr_lake(h + (a ? dirs[(i + 5) % 6] : dirs[i]))) ? 0.3 : dw);
     }
   }
+#endif
   return P;
 }
 `
@@ -453,8 +457,10 @@ TDFog td_fogAt(RRProv P) {
   }
   const float h = ${(FOG_BLEND / 2).toFixed(3)};
   td_add(f, td_fogOf(P.hex), smoothstep(-h, h, P.d));
+#ifndef TD_OFF_BLEND
   for (int i = 0; i < 6; i++)
     if (P.dn[i] < h) td_add(f, td_fogOf(P.hex + RR_DIRS[i]), 1.0 - smoothstep(-h, h, P.dn[i]));
+#endif
   return f;
 }
 `
@@ -598,7 +604,9 @@ float rr_lum = dot(diffuseColor.rgb, vec3(0.2126, 0.7152, 0.0722));
 diffuseColor.rgb *= 1.0 - rr_ink * mix(0.24, 0.14, smoothstep(0.15, 0.6, rr_lum));
 // A target province takes a faint wash of the hint, inside its whole outline.
 if (rr_s0.r > 0.5) diffuseColor.rgb = mix(diffuseColor.rgb, uHint, 0.12 * (1.0 - smoothstep(0.0, 0.5, rr_rim)));
+#ifndef TD_OFF_GRAIN
 diffuseColor.rgb *= 1.0 - rr_cloud(vWPos.xz, uTime);
+#endif
 // Fog of war (§15.4): the province's state from texel 2, blended with its neighbours' across the warped border. The
 // unseen share is tinted after lighting (opaque_fragment).
 TDFog rr_fog = td_fogAt(rr_prov);
@@ -607,6 +615,7 @@ diffuseColor.rgb = td_tintSeen(diffuseColor.rgb, rr_fog, vWPos.xz);`,
       .replace(
         '#include <normal_fragment_maps>',
         `#include <normal_fragment_maps>
+#ifndef TD_OFF_GRAIN
 // Rock grain on mountainsides and cliffs: bend the normal by a noise gradient (no extra geometry).
 if (vRock > 0.02) {
   vec2 rp = vWPos.xz * 4.2;
@@ -629,7 +638,8 @@ if (rr_snow > 0.01) {
   diffuseColor.rgb *= 1.0 - rr_snow * (0.05 + 0.045 * grain);
   float lit = dot(normal, normalize((viewMatrix * vec4(uSun, 0.0)).xyz));
   diffuseColor.rgb *= mix(vec3(1.0), vec3(0.78, 0.86, 1.0), rr_snow * smoothstep(0.45, -0.05, lit));
-}`,
+}
+#endif`,
       )
       .replace(
         '#include <emissivemap_fragment>',
