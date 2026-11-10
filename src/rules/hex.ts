@@ -6,8 +6,7 @@ type Cube = { x: number; y: number; z: number }
 const z0 = (n: number): number => (n === 0 ? 0 : n) // normalise -0
 
 export function toAxial(o: Off): Ax {
-  // r stays exactly -row (-0 at row 0): the brief's test asserts 1.5 * r === -1.5 * row under Object.is
-  return { q: z0(o.col + (o.row + (o.row & 1)) / 2), r: -o.row }
+  return { q: z0(o.col + (o.row + (o.row & 1)) / 2), r: z0(-o.row) }
 }
 
 export function toOffset(a: Ax): Off {

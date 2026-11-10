@@ -6,7 +6,7 @@ test('axial round-trips and matches world position', () => {
   for (let row = 0; row < 30; row++) for (let col = 0; col < 12; col++) {
     const a = toAxial({ row, col }); assert.deepEqual(toOffset(a), { row, col })
     const x = Math.sqrt(3) * (a.q + a.r / 2); assert.ok(Math.abs(x - Math.sqrt(3) * (col + 0.5 * (row & 1))) < 1e-9)
-    assert.equal(1.5 * a.r, -1.5 * row)            // z = 1.5 r: forward is −z, up the screen
+    assert.equal(1.5 * a.r + 0, -1.5 * row + 0)            // z = 1.5 r: forward is −z, up the screen
   }
 })
 test('neighbours are at distance 1 and include the row above', () => {
