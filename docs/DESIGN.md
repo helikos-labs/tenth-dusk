@@ -319,7 +319,7 @@ An expired clock records a scar for that chapter. A scar is a flag that later co
 The generator rerolls with the next seed if any check fails:
 
 - The hearth can be reached in 7 days or less by the cheapest path, after opening the main gate with keys the zone itself provides.
-- Every beacon plus the hearth can be reached in 10 days, with no more than half a day to spare: possible, but tight.
+- Every beacon plus the hearth can be reached in 10 days, counting 8 steps a day (the 6 day steps plus the 2 pressing-on night steps, §5.1), but not in under 9.5 days at 6 steps a day: possible, but tight, and only by pressing on.
 - No landmark is cut off. Every one can be reached through open hexes, links, or locks whose keys can be reached earlier.
 - Every non-foreshadow lock has its key reachable before the lock. No main-gate key can be missed.
 - Each 5-row band has at least one camp site, and each zone has at least one cave.
