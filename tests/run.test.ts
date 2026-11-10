@@ -4,6 +4,11 @@ import { camp, campOptions, canMove, move, newRun, path, pressOn } from '../src/
 import type { RunState } from '../src/rules/run.ts'
 import { STARTING_HERO } from '../src/data/kit.ts'
 import { distance, key } from '../src/rules/hex.ts'
+import type { Off } from '../src/rules/hex.ts'
+import type { Zone } from '../src/rules/zone.ts'
+import { TERRAIN } from '../src/data/terrain.ts'
+import { CHAPTER1 } from '../src/data/book1.ts'
+import { generateZone } from '../src/rules/gen.ts'
 import { mk } from './helpers.ts'
 
 const START = { '0,0': 'start' } as const
@@ -216,4 +221,54 @@ test('the tenth dusk without the hearth expires the chapter and records the scar
   const e = camp(s, ['rest'])
   assert.equal(e.status, 'expired'); assert.deepEqual(e.scars, ['b1c1'])
   assert.equal(e.events.at(-1)!.kind, 'expired')
+})
+
+// R22: the dawn push lands where the hearth can still be walked to.
+const hearthOf = (z: Zone): Off => {
+  const c = [...z.cells.values()].find((c) => c.landmark === 'hearth')!
+  return { row: c.row, col: c.col }
+}
+const standable = (s: RunState, o: Off): boolean => {
+  const c = s.zone.cells.get(key(o))
+  return !!c && !c.wall && o.row >= s.sunkBelow && (TERRAIN[c.terrain].steps !== null || !!c.crossing)
+}
+
+test('a dawn push never strands the hero away from the hearth (seed H1)', () => {
+  const s0 = newRun(generateZone(CHAPTER1, 'H1'), 'Wren')
+  const d = camp({ ...s0, at: { row: 6, col: 1 }, lastCamp: { row: 6, col: 1 }, furthestRow: 11 }, ['rest'])
+  assert.ok(d.events.some((e) => e.kind === 'pushed'))
+  assert.ok(standable(d, d.at), `pushed to ${key(d.at)}`)
+  assert.notEqual(path(d, hearthOf(d.zone)), null, `pushed to ${key(d.at)}, cut off from the hearth`)
+  assert.deepEqual(d.lastCamp, d.at)
+})
+
+test('with no hex left that reaches the hearth, the push falls back to the nearest one the hero can stand on', () => {
+  const rows = grid(14)
+  rows[12] = 'RRRR' // the river rings the hearth: no other hex can reach it
+  rows[13] = 'RRRM'
+  const s0 = newRun(mk(rows, undefined, { '3,0': 'start', '13,3': 'hearth' }), 'Wren')
+  const d = camp({ ...s0, furthestRow: 10 }, ['rest'])
+  assert.deepEqual(d.at, { row: 6, col: 0 })
+  assert.ok(d.events.some((e) => e.kind === 'pushed'))
+})
+
+test('over 300 seeds, no dawn push leaves the hero without a path to the hearth', () => {
+  let pushes = 0
+  for (let i = 0; i < 300; i++) {
+    const z = generateZone(CHAPTER1, 'P' + i)
+    const s0 = newRun(z, 'Wren')
+    const hearth = hearthOf(z)
+    // Camping 5 or 6 rows behind the furthest row, on one standable hex of each row the Hush can take.
+    for (let row = 1; row <= 11; row++) {
+      const cols = Array.from({ length: z.cols }, (_, k) => (k + row * 4 + i) % z.cols)
+      const col = cols.find((col) => standable(s0, { row, col }))
+      if (col === undefined) continue
+      const at = { row, col }
+      const d = camp({ ...s0, at, lastCamp: at, furthestRow: row + 5 + ((i + row) % 2) }, ['rest'])
+      assert.ok(d.at.row >= d.sunkBelow)
+      pushes++
+      assert.notEqual(path(d, hearth), null, `P${i}: camped at ${key(at)}, pushed to ${key(d.at)}, cut off from the hearth`)
+    }
+  }
+  assert.ok(pushes >= 3000, `${pushes} pushes`)
 })

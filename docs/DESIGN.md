@@ -76,7 +76,7 @@ A single-player 3D hex adventure for phones, played in portrait with one thumb. 
 - **Camp** ends the day. The hero can camp on any hex. A camp-site landmark, or a cave, is safe and grants a third night action.
 - **Night actions** (choose 2, or 3 when safe): Rest (+10 vigour), Tend the ember (+2 ember), Forage (gain a ration; ambush 1 in 4; not possible on badlands), Read the stars (reveal one rumour).
 - **Pressing on:** after the 6th step, up to 2 night steps. Sight is 1 less, and each night step has a 1-in-3 ambush.
-- **Dawn:** steps refill. Then **the Hush** sinks every row more than 4 below the furthest row the hero has reached in this zone.
+- **Dawn:** steps refill. Then **the Hush** sinks every row more than 4 below the furthest row the hero has reached in this zone. A hero standing on a sunk row moves to the nearest unsunk hex they can stand on that still has a path to the hearth (the nearest they can stand on, if none has).
 - **The clock:** the ember dies at the 10th dusk unless the hero reaches the zone's hearth. Some relics add a day (for example, the Hourglass of Ammer: +1).
 - **When the clock runs out:** the chapter ends where the hero stands, the book records a **scar** (§13.3), and the next chapter starts at its own start. The game never ends this way.
 - **Falling in battle:** the hero wakes at their last camp with every item. Falling costs 1 day and resets vigour to half.

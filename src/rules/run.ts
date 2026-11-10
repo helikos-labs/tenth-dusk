@@ -140,10 +140,15 @@ export function move(s: RunState, to: Off): RunState {
   return out
 }
 
-export function path(s: RunState, to: Off): { path: Off[]; costs: number[] } | null {
+/** The keys of the hexes the Hush has taken. */
+function sunkKeys(s: RunState): Set<string> {
   const sunk = new Set<string>()
   for (const [k, c] of s.zone.cells) if (c.row < s.sunkBelow) sunk.add(k)
-  return cheapestPath(s.zone, s.at, to, sunk)
+  return sunk
+}
+
+export function path(s: RunState, to: Off): { path: Off[]; costs: number[] } | null {
+  return cheapestPath(s.zone, s.at, to, sunkKeys(s))
 }
 
 export function pressOn(s: RunState): RunState {
@@ -178,10 +183,16 @@ function dawn(s: RunState): RunState {
   out.fog = fog
   if (newlySunk) out.events.push({ kind: 'sunk', at, day: out.day })
   if (at.row < out.sunkBelow) {
-    const dest = [...out.zone.cells.values()]
+    // The nearest unsunk hex the hero can stand on and still walk to the hearth from, however many days it takes
+    // (R22), never the hearth itself; only when there is none, the nearest they can stand on.
+    const standable = [...out.zone.cells.values()]
       .filter((c) => c.row >= out.sunkBelow && !c.wall && (TERRAIN[c.terrain].steps !== null || c.crossing))
       .map((c) => ({ row: c.row, col: c.col }))
-      .sort((a, b) => distance(at, a) - distance(at, b) || cmpOff(a, b))[0]
+      .sort((a, b) => distance(at, a) - distance(at, b) || cmpOff(a, b))
+    const hearth = [...out.zone.cells.values()].find((c) => c.landmark === 'hearth')
+    const sunk = sunkKeys(out)
+    const reaches = (o: Off) => !!hearth && key(o) !== key(hearth) && cheapestPath(out.zone, o, hearth, sunk) !== null
+    const dest = standable.find(reaches) ?? standable[0]
     if (dest) {
       out.at = dest
       out.lastCamp = dest
