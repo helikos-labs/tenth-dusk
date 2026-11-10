@@ -217,6 +217,58 @@ export function noWarpTexture(): THREE.DataTexture {
   return tex
 }
 
+/** Edge i of a hex faces neighbour RR_DIRS_ALL[i]; its outward normal points at 60 * i - 60 degrees; corner i starts it. */
+const v2 = (x: number, y: number) => `vec2(${x.toFixed(7)}, ${y.toFixed(7)})`
+const R3 = 0.8660254
+const RR_DIRS_ALL = [v2(1, -1), v2(1, 0), v2(0, 1), v2(-1, 1), v2(-1, 0), v2(0, -1)]
+const RR_NORMS = [v2(0.5, -R3), v2(1, 0), v2(0.5, R3), v2(-0.5, R3), v2(-1, 0), v2(-0.5, -R3)]
+const RR_CORNERS = [v2(0, -1), v2(R3, -0.5), v2(R3, 0.5), v2(0, 1), v2(-R3, 0.5), v2(-R3, -0.5)]
+/** RRProv's border distance to neighbour i. */
+const RR_DN = ['dnA.x', 'dnA.y', 'dnA.z', 'dnB.x', 'dnB.y', 'dnB.z']
+const SIX = [0, 1, 2, 3, 4, 5]
+/**
+ * rr_province's border distances, written out per edge and corner with constant indices (no loops over arrays).
+ * Edge pass: an edge whose neighbour is off the board is the outline (P.edge), else a border (d, its dn, ink; a border
+ * with a lake is a shore, not an ink line, and counts as 0.3 away so the distance stays continuous). Corner pass, on
+ * the outline only: corner i is an inner corner when one of its two edges is shared and the other is not; beyond it
+ * the border with that neighbour is the ray from the board's centre (the part from the corner outwards).
+ */
+const RR_EDGES_GLSL = [
+  ...SIX.map((i) => `  bool rr_on${i} = rr_on(h + ${RR_DIRS_ALL[i]});`),
+  ...SIX.map(
+    (i) => `  {
+    float dw = (0.8660254 - dot(P.local, ${RR_NORMS[i]})) / max(length(vec2(dot(${RR_NORMS[i]}, jx), dot(${RR_NORMS[i]}, jz))), 0.25);
+    if (!rr_on${i}) {
+      if (!off) P.edge = min(P.edge, dw);
+    } else if (!off) {
+      P.d = min(P.d, dw);
+      P.${RR_DN[i]} = dw;
+      P.ink = min(P.ink, dw < 0.3 && (P.lake > 0.5 || rr_lake(h + ${RR_DIRS_ALL[i]})) ? 0.3 : dw);
+    }
+  }`,
+  ),
+  `  if (!(rr_on0 && rr_on1 && rr_on2 && rr_on3 && rr_on4 && rr_on5)) {`,
+  ...SIX.map((i) => {
+    const j = (i + 5) % 6
+    const across = (k: number) => `P.${RR_DN[k]} = min(P.${RR_DN[k]}, dw);
+        P.ink = min(P.ink, dw < 0.3 && (P.lake > 0.5 || rr_lake(h + ${RR_DIRS_ALL[k]})) ? 0.3 : dw);`
+    return `    if (rr_on${j} != rr_on${i}) {
+      vec2 v = ctr + ${RR_CORNERS[i]};
+      vec2 dir = normalize(v - uRim.xy);
+      vec2 perp = vec2(-dir.y, dir.x);
+      float dr = dot(w - uRim.xy, dir) > length(v - uRim.xy) ? abs(dot(w - uRim.xy, perp)) : length(w - v);
+      float dw = dr / max(length(vec2(dot(perp, jx), dot(perp, jz))), 0.25);
+      P.d = min(P.d, dw);
+      if (rr_on${j}) {
+        ${across(j)}
+      } else {
+        ${across(i)}
+      }
+    }`
+  }),
+  `  }`,
+].join('\n')
+
 /**
  * The province lookup, in GLSL: the warp (from the warp texture over `uWarpBox`) and field.ts's `hexAt`, then the hex's slot in the state
  * texture. `rr_province(world xz, on land)` returns an RRProv:
@@ -290,11 +342,11 @@ vec2 rr_hexOf(vec2 world) {
 }
 // The six neighbours' directions (axial), edge i facing RR_DIRS[i].
 const vec2 RR_DIRS[6] = vec2[6](vec2(1.0, -1.0), vec2(1.0, 0.0), vec2(0.0, 1.0), vec2(-1.0, 1.0), vec2(-1.0, 0.0), vec2(0.0, -1.0));
-// hex: the province's axial coordinates; dn[i]: the distance to the border with neighbour RR_DIRS[i] (9 where there is
-// none: the board's outline, or off the board).
-struct RRProv { float slot; vec2 local; float lake; float d; float ink; float edge; vec2 hex; float dn[6]; };
+// hex: the province's axial coordinates; dnA.xyz, dnB.xyz: the distances to the borders with neighbours 0 to 5
+// (RR_DIRS order; 9 where there is none: the board's outline, or off the board).
+struct RRProv { float slot; vec2 local; float lake; float d; float ink; float edge; vec2 hex; vec3 dnA; vec3 dnB; };
 RRProv rr_province(vec2 world, bool land) {
-  RRProv P = RRProv(-1.0, vec2(0.0), 0.0, 9.0, 9.0, 9.0, vec2(0.0), float[6](9.0, 9.0, 9.0, 9.0, 9.0, 9.0));
+  RRProv P = RRProv(-1.0, vec2(0.0), 0.0, 9.0, 9.0, 9.0, vec2(0.0), vec3(9.0), vec3(9.0));
   vec2 dsp = rr_disp(world);
   vec2 w = world + dsp;
   vec2 h = rr_hexRound(w);
@@ -311,43 +363,10 @@ RRProv rr_province(vec2 world, bool land) {
   P.hex = h;
   P.local = w - ctr;
   P.lake = rr_lake(h) ? 1.0 : 0.0;
-  // Edge i faces neighbour EDGE_DIR[i]; its outward normal points at 60 * i - 60 degrees; corner i starts it.
-  vec2 dirs[6] = vec2[6](vec2(1.0, -1.0), vec2(1.0, 0.0), vec2(0.0, 1.0), vec2(-1.0, 1.0), vec2(-1.0, 0.0), vec2(0.0, -1.0));
-  vec2 norms[6] = vec2[6](vec2(0.5, -0.8660254), vec2(1.0, 0.0), vec2(0.5, 0.8660254), vec2(-0.5, 0.8660254), vec2(-1.0, 0.0), vec2(-0.5, -0.8660254));
-  vec2 corners[6] = vec2[6](vec2(0.0, -1.0), vec2(0.8660254, -0.5), vec2(0.8660254, 0.5), vec2(0.0, 1.0), vec2(-0.8660254, 0.5), vec2(-0.8660254, -0.5));
 #ifndef TD_OFF_BORDER
-  bool rim = false;
-  for (int i = 0; i < 6; i++) {
-    vec2 n = norms[i];
-    float dw = (0.8660254 - dot(P.local, n)) / max(length(vec2(dot(n, jx), dot(n, jz))), 0.25);
-    if (!rr_on(h + dirs[i])) {
-      rim = true;
-      if (!off) P.edge = min(P.edge, dw);
-      continue;
-    }
-    if (off) continue;
-    P.d = min(P.d, dw);
-    P.dn[i] = dw;
-    // A border with a lake is a shore, not an ink line; it counts as 0.3 away, so the distance stays continuous.
-    P.ink = min(P.ink, dw < 0.3 && (P.lake > 0.5 || rr_lake(h + dirs[i])) ? 0.3 : dw);
-  }
-  if (rim) {
-    // Corner i is an inner corner of the outline when one of its two edges is shared and the other is not; beyond it
-    // the border with that neighbour is the ray from the board's centre (the part from the corner outwards).
-    for (int i = 0; i < 6; i++) {
-      bool a = rr_on(h + dirs[(i + 5) % 6]);
-      if (a == rr_on(h + dirs[i])) continue;
-      vec2 v = ctr + corners[i];
-      vec2 dir = normalize(v - uRim.xy);
-      vec2 perp = vec2(-dir.y, dir.x);
-      float dr = dot(w - uRim.xy, dir) > length(v - uRim.xy) ? abs(dot(w - uRim.xy, perp)) : length(w - v);
-      float dw = dr / max(length(vec2(dot(perp, jx), dot(perp, jz))), 0.25);
-      P.d = min(P.d, dw);
-      int across = a ? (i + 5) % 6 : i;
-      P.dn[across] = min(P.dn[across], dw);
-      P.ink = min(P.ink, dw < 0.3 && (P.lake > 0.5 || rr_lake(h + (a ? dirs[(i + 5) % 6] : dirs[i]))) ? 0.3 : dw);
-    }
-  }
+  // Unrolled with constant indices (RR_EDGES_GLSL): computed indices into local arrays send them to memory on Adreno
+  // GPUs, which held an Adreno 740 at 5 fps.
+${RR_EDGES_GLSL}
 #endif
   return P;
 }
@@ -458,8 +477,7 @@ TDFog td_fogAt(RRProv P) {
   const float h = ${(FOG_BLEND / 2).toFixed(3)};
   td_add(f, td_fogOf(P.hex), smoothstep(-h, h, P.d));
 #ifndef TD_OFF_BLEND
-  for (int i = 0; i < 6; i++)
-    if (P.dn[i] < h) td_add(f, td_fogOf(P.hex + RR_DIRS[i]), 1.0 - smoothstep(-h, h, P.dn[i]));
+${RR_DIRS_ALL.map((d, i) => `  if (P.${RR_DN[i]} < h) td_add(f, td_fogOf(P.hex + ${d}), 1.0 - smoothstep(-h, h, P.${RR_DN[i]}));`).join('\n')}
 #endif
   return f;
 }
