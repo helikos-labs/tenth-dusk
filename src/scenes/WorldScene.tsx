@@ -9,7 +9,7 @@ import type { WorldCell } from '../world/adapter.ts'
 import { buildField, type Field } from '../world/field.ts'
 import { SLOTS, TEXELS, boardShape, makeStateTexture, makeTerrainMaterial, makeWaterMaterial, noWarpTexture } from '../world/materials.ts'
 import { buildRoads } from '../world/roads.ts'
-import { useWorld, useWorldClient } from '../world/useWorld.ts'
+import { SMALL_SCREEN, useWorld, useWorldClient } from '../world/useWorld.ts'
 import type { WorldClient } from '../world/worldClient.ts'
 
 export interface WorldSceneProps {
@@ -31,7 +31,6 @@ const SUN_COLOR = 0xffe0c0
 const SUN_INTENSITY = 2.1
 /** Sky and ground of the hemisphere light. */
 const HEMI = { sky: 0x8ea3c2, ground: 0x2a221d, intensity: 0.75 }
-const SMALL_SCREEN = typeof window !== 'undefined' && (window.matchMedia?.('(max-width: 700px)').matches || (navigator.hardwareConcurrency ?? 8) <= 4)
 /** Test hooks (window.__worldReady) only with ?test=1 in the URL (R6). */
 const TEST = typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('test') === '1'
 

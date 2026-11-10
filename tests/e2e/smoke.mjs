@@ -2,6 +2,8 @@
 // 390 × 844 in Chromium on SwiftShader, waits for window.__worldReady (exposed with ?test=1, R4 and R6), and fails on
 // any console error or page error, or when the canvas's centre 50 × 50 pixels are all one colour. Saves
 // tests/e2e/out/world.png. Run after `npm run build`: node tests/e2e/smoke.mjs
+// Requires Playwright with Chromium installed outside the app (not a dependency of it): `require('playwright')` must
+// resolve, as it does in the cloud sessions' environment (NODE_PATH points at the pre-installed copy).
 import { spawn } from 'node:child_process'
 import { mkdirSync } from 'node:fs'
 import { createRequire } from 'node:module'

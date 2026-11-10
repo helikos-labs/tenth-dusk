@@ -14,6 +14,9 @@ import { PlantMeshes } from './vegetation.ts'
 import type { WorldUpdate } from './worldBuild.ts'
 import { WorldClient } from './worldClient.ts'
 
+/** A phone, a small screen or a device with few cores: lower mesh detail (`detailFor`) and a lighter render. */
+export const SMALL_SCREEN = typeof window !== 'undefined' && (window.matchMedia?.('(max-width: 700px)').matches || (navigator.hardwareConcurrency ?? 8) <= 4)
+
 /**
  * Mesh and plant density for this device: 1 on desktops; 0.75 on phones and small or few-core screens (`small`,
  * Board3D's SMALL_SCREEN); 0.6 on weak phones, told apart cheaply: a small screen with at most 4 cores and a pixel
