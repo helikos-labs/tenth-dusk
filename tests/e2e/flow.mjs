@@ -7,7 +7,8 @@
 //   3. a hex 2 away tapped twice: the hero walks there and the steps fall;
 //   4. a reload, then "Continue": the same day and steps, and "Ash" in the Pack;
 //   5. a tap on a peaks wall hex the Hush hasn't taken (a seen one if any): the chip "Can't cross";
-//   6. Camp, Rest and Tend, "Sleep until dawn": "DAY 2 / 10" and "6 / 6";
+//   6. Camp ("Read the stars" disabled, with its note, R23), Rest and Tend, "Sleep until dawn": "DAY 2 / 10" and
+//      "6 / 6";
 //   7. at 360 × 640 the HUD's top bar, tracker and bottom bar don't overlap; at 844 × 390, "Turn your phone upright";
 //   8. corrupt text under the save key and a reload: "Start a new journey" shows and the text is set aside under
 //      `…corrupt`.
@@ -291,6 +292,9 @@ async function flow(browser, seed) {
   // 6. A night's camp.
   await press(page, 'Camp')
   await expectText(page, 'Tend the night', 'camp sheet')
+  if (await page.getByRole('button', { name: /^Read the stars/ }).isDisabled()) pass('"Read the stars" is disabled')
+  else fail('"Read the stars" can be picked in M1')
+  await expectText(page, 'Reading the stars arrives in the next update', 'camp sheet note')
   await page.getByRole('button', { name: /^Rest/ }).click()
   await page.getByRole('button', { name: /^Tend the ember/ }).click()
   const picks = await page.evaluate(() => (['camp', 'cave'].includes(window.__run.zone.cells.get(`${window.__run.at.row},${window.__run.at.col}`).landmark) ? 3 : 2))
