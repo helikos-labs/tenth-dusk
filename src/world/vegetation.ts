@@ -1,7 +1,8 @@
 // Copied from helikos-labs/rift-and-root@7f00e23 src/board3d/vegetation.ts, adapted for Tenth Dusk.
-// Plants and rocks for the 3D board, all instanced: pine and broadleaf woods, grass tufts, a different mix of flowers in
-// every field, boulders and hardy pines on the mountains, crystal spikes on the Blight. Placement is seeded by each
-// hex's coordinates, so a hex keeps the same trees and flowers for the whole game. Plants sway in the wind (materials.ts).
+// Plants and rocks for the 3D board, all instanced: pine and broadleaf woods (denser and darker in old wood), grass
+// tufts, a different mix of flowers in every field, heath with its own flowers and stones but no trees, reeds round the
+// marsh pools, boulders and hardy pines on the mountains. Placement is seeded by each hex's coordinates, so a hex keeps
+// the same trees and flowers for the whole game. Plants sway in the wind (materials.ts).
 //
 // ORGANIC CONCEPT: plants follow the warped provinces, not hexagons. Each hex scatters candidates over a disc round its
 // centre and keeps those its province owns, so woods fill their meandering outline; trees thin out raggedly towards a
@@ -18,6 +19,8 @@ import { LATTICE } from './terrainMesh.ts'
 
 /** Hex centres keep a clearing this wide for the hero and Landmarks. */
 export const CLEARING = 0.34
+/** Old wood (§15.3): its trees stand this many times as thick as a forest's, and darker. */
+export const OLD_WOOD = { density: 1.6, shade: 0.72 }
 
 /** mulberry32 seeded from a hex. */
 function rng(q: number, r: number, salt: number) {
@@ -187,11 +190,6 @@ function boulder(seed: number): THREE.BufferGeometry {
   )
 }
 
-function spike(): THREE.BufferGeometry {
-  const g = new THREE.OctahedronGeometry(0.035, 0).scale(0.7, 3.2, 0.7).translate(0, 0.1, 0)
-  return paint(g, (y) => C('#2a0e33').lerp(C('#c03cff'), Math.min(1, Math.max(0, (y - 0.04) * 6))))
-}
-
 // ---------------------------------------------------------------- placement
 //
 // Placement is plain numbers (an instance matrix and a tint a plant), with no three.js objects in it but colours and
@@ -200,10 +198,10 @@ function spike(): THREE.BufferGeometry {
 // are placed again (worldBuild.ts) and every other province keeps exactly the plants it had.
 
 /** The kinds of plant; each is one instanced mesh (flowers are two: stems and heads on the same spots). */
-export const PLANT_KINDS = ['conifer', 'oak', 'tuft', 'reed', 'flower', 'rock', 'spike'] as const
+export const PLANT_KINDS = ['conifer', 'oak', 'tuft', 'reed', 'flower', 'rock'] as const
 export type PlantKind = (typeof PLANT_KINDS)[number]
 /** Kinds drawn without a tint of their own. */
-const UNTINTED: readonly PlantKind[] = ['rock', 'spike']
+const UNTINTED: readonly PlantKind[] = ['rock']
 
 /** One province's plants (or the islets'): per kind, 16 matrix numbers a plant and, if tinted, 3 colour numbers. */
 export type PlantLists = Record<PlantKind, { matrix: number[]; color: number[] }>
@@ -275,18 +273,22 @@ export function placeProvince(field: Field, cell: WorldCell, detail = 1): PlantL
   const inFront = (p: { x: number; z: number }) => p.z > 0.04 && Math.abs(p.x) < 0.17 + 0.35 * p.z && p.z < 0.8
 
   if (cell.terrain === 'forest') {
-    // Some woods are mostly pine, some mostly oak.
+    // Some woods are mostly pine, some mostly oak. Old wood packs its trees closer (more tries, less room each).
     const pine = 0.25 + hash01(cell.q, cell.r, 5) * 0.6
     const placed: { x: number; z: number }[] = []
-    const tries = more((busy ? 95 : 130) * detail)
+    const thick = cell.dense ? OLD_WOOD.density : 1
+    const room = 0.15 / Math.sqrt(thick)
+    const tries = more((busy ? 95 : 130) * thick * detail)
     for (let t = 0; t < tries; t++) {
       const s = sample(inner)
-      if (!s || inFront(s.p) || placed.some((o) => Math.hypot(o.x - s.p.x, o.z - s.p.z) < 0.15)) continue
+      if (!s || inFront(s.p) || placed.some((o) => Math.hypot(o.x - s.p.x, o.z - s.p.z) < room)) continue
       const pr = field.probe(s.x, s.z)
       // Ragged edges: the wood thins out towards its border.
       if (pr.sd.forest + fray('forest', s.x, s.z) < 0.28 * rand() || wetBank(pr) || pr.height < WATER_LEVEL + 0.01) continue
       placed.push(s.p)
-      const item = { x: s.x, y: pr.height - 0.004, z: s.z, s: 0.82 + rand() * 0.45, rot: rand() * Math.PI * 2, color: tint(rand, 0.32) }
+      const color = tint(rand, 0.32)
+      if (cell.dense) color.multiplyScalar(OLD_WOOD.shade)
+      const item = { x: s.x, y: pr.height - 0.004, z: s.z, s: 0.82 + rand() * 0.45, rot: rand() * Math.PI * 2, color }
       put(out, rand() < pine ? 'conifer' : 'oak', item)
     }
   }
@@ -305,7 +307,8 @@ export function placeProvince(field: Field, cell: WorldCell, detail = 1): PlantL
 
   if (cell.terrain === 'grassland') {
     // The wood's fringe: young trees and bushes straggle out into the meadow, and a few stand alone in the fields.
-    const nf = more(70 * detail)
+    // Heath grows none.
+    const nf = cell.heath ? 0 : more(70 * detail)
     for (let i = 0; i < nf; i++) {
       const s = sample(inner)
       if (!s || inFront(s.p)) continue
@@ -318,7 +321,7 @@ export function placeProvince(field: Field, cell: WorldCell, detail = 1): PlantL
       put(out, bush || rand() < 0.45 ? 'oak' : 'conifer', item)
     }
     // Flowers grow in clumps: a main kind and a second kind per field.
-    const { main, second } = flowersOf(cell.q, cell.r)
+    const { main, second } = flowersOf(cell.q, cell.r, cell.heath)
     const clumps = 4 + Math.floor(rand() * 3)
     for (let k = 0, tries = 0; k < clumps && tries < 40; tries++) {
       const cc = sample(busy ? CLEARING : 0.18)
@@ -340,16 +343,18 @@ export function placeProvince(field: Field, cell: WorldCell, detail = 1): PlantL
     }
   }
 
-  if (cell.terrain === 'water' || cell.terrain === 'grassland' || cell.terrain === 'forest') {
-    // Reeds in clumps along the lake margins: in the shallows and on the wet bank.
-    const nr = more((cell.terrain === 'water' ? 260 : 90) * detail)
+  if (cell.terrain !== 'mountain') {
+    // Reeds in clumps along the lake margins: in the shallows and on the wet bank. A marsh's pools (field.ts: where its
+    // sunken ground drops below the water) get the same margins.
+    const marsh = cell.terrain === 'blight'
+    const nr = more((cell.terrain === 'water' ? 260 : marsh ? 220 : 90) * detail)
     for (let i = 0; i < nr; i++) {
       const s = sample(cell.terrain === 'water' ? 0 : inner)
       if (!s) continue
       if (fbm(s.x * 3.2, s.z * 3.2, 81, 2) < 0.5) continue
       const pr = field.probe(s.x, s.z)
-      const shallow = pr.ground === 'water' && WATER_LEVEL - pr.height < 0.035
-      const bank = pr.ground !== 'water' && pr.ground !== 'sea' && pr.lake < 0.06
+      const shallow = (pr.ground === 'water' || (pr.ground === 'blight' && pr.height < WATER_LEVEL)) && WATER_LEVEL - pr.height < 0.035
+      const bank = pr.ground !== 'water' && pr.ground !== 'sea' && (pr.lake < 0.06 || (pr.ground === 'blight' && pr.height < WATER_LEVEL + 0.05))
       if (!shallow && !bank) continue
       put(out, 'reed', { x: s.x, y: pr.height - 0.004, z: s.z, s: 0.8 + rand() * 0.6, rot: rand() * Math.PI * 2, color: tint(rand, 0.3) })
     }
@@ -362,8 +367,8 @@ export function placeProvince(field: Field, cell: WorldCell, detail = 1): PlantL
       const pr = field.probe(s.x, s.z)
       const y = pr.height - 0.004
       if (rand() < 0.42) put(out, 'rock', { x: s.x, y: y - 0.01, z: s.z, s: 0.7 + rand() * 0.9, rot: rand() * Math.PI * 2, tilt: (rand() - 0.5) * 0.5 })
-      // Hardy pines on the lower slopes.
-      else if (y < 0.34 && y > WATER_LEVEL + 0.02 && rand() < 0.5) put(out, 'conifer', { x: s.x, y, z: s.z, s: 0.55 + rand() * 0.3, rot: rand() * 6.28, color: tint(rand, 0.25) })
+      // Hardy pines on the lower slopes (measured from the terrace the range stands on).
+      else if (y - pr.terrace < 0.34 && y > WATER_LEVEL + 0.02 && rand() < 0.5) put(out, 'conifer', { x: s.x, y, z: s.z, s: 0.55 + rand() * 0.3, rot: rand() * 6.28, color: tint(rand, 0.25) })
     }
   } else if (cell.terrain !== 'water') {
     // Boulders fan out round a range's foot.
@@ -376,13 +381,14 @@ export function placeProvince(field: Field, cell: WorldCell, detail = 1): PlantL
     }
   }
 
-  if (cell.terrain === 'blight') {
-    for (let i = 0; i < more(34); i++) {
-      const s = sample(busy ? CLEARING : 0.1)
+  if (cell.heath) {
+    // Stones scattered over the heath.
+    for (let i = 0; i < more(16); i++) {
+      const s = sample(inner)
       if (!s) continue
       const pr = field.probe(s.x, s.z)
-      if (pr.sd.blight < 0.12 * rand() || pr.height < WATER_LEVEL) continue
-      put(out, 'spike', { x: s.x, y: pr.height - 0.014, z: s.z, s: 0.6 + rand() * 1.0, rot: rand() * 6.28, tilt: (rand() - 0.5) * 0.7 })
+      if (pr.heath < 0.1 * rand() || wetBank(pr)) continue
+      put(out, 'rock', { x: s.x, y: pr.height - 0.012, z: s.z, s: 0.3 + rand() * 0.5, rot: rand() * Math.PI * 2, tilt: (rand() - 0.5) * 0.5 })
     }
   }
   return out
@@ -521,13 +527,6 @@ export class PlantMeshes {
       part('flower', stem(), plant(2.2, 'stem'), false, false),
       part('flower', bloom(), plant(2.2, 'bloom', { roughness: 0.6 }), false),
       part('rock', boulder(7), new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.95, flatShading: true }), true),
-      // Blight spikes are small and glow: their shadows on the dark Blight were all but invisible, so they cast none.
-      part(
-        'spike',
-        spike(),
-        new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.35, metalness: 0.1, emissive: new THREE.Color('#7a1aa6'), emissiveIntensity: 0.55 }),
-        false,
-      ),
     ]
   }
 

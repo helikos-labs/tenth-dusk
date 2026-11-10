@@ -5,7 +5,7 @@
 // sand and mud at the water, scree round a range's foot, rock on cliffs) and the coast has beaches, cliffs and islets.
 import * as THREE from 'three'
 import type { Terrain, WorldCell } from './adapter.ts'
-import { LAND, SQRT3, WATER_LEVEL, fbm, fray, ridged, smoothstep, type Bounds, type Field, type Probe, type Rect } from './field.ts'
+import { LAND, PEAK_SCALE, SQRT3, WATER_LEVEL, fbm, fray, ridged, smoothstep, type Bounds, type Field, type Probe, type Rect } from './field.ts'
 import { flowersOf } from './flora.ts'
 import { slotOf } from './materials.ts'
 import { PALETTE as PAL } from './palette.ts'
@@ -29,6 +29,19 @@ const tmp = new THREE.Color()
 const tmpFlower = new THREE.Color()
 const tmpHeath = new THREE.Color()
 const tmpSnow = new THREE.Color()
+const tmpWood = new THREE.Color()
+
+/**
+ * How far snow covers a mountain point (0 to 1), before slope: on mountains a ragged line 0.66 to 0.86 above the
+ * terrace, on peaks above 70% of the local maximum (the height the crests reach there, field.ts `top`), so the crests
+ * of a wall are white and its gullies and faces bare. `n` and `m` are the colour noise (0.5 for none).
+ */
+function snowLine(pr: Probe, h: number, n: number, m: number): number {
+  const wobble = 0.12 * (n - 0.5) + 0.1 * (m - 0.5)
+  const mountain = smoothstep(0.66, 0.86, h - pr.terrace + wobble)
+  const peak = smoothstep(0.66, 0.76, h / Math.max(pr.top, 1e-6) + 0.5 * wobble)
+  return mountain + (peak - mountain) * smoothstep(1, PEAK_SCALE, pr.scale)
+}
 
 /** Ground colour of land terrain `t` at a world point, given the height and slope there. */
 function groundColor(t: Terrain, pr: Probe, x: number, z: number, h: number, ny: number, out: THREE.Color): THREE.Color {
@@ -40,25 +53,36 @@ function groundColor(t: Terrain, pr: Probe, x: number, z: number, h: number, ny:
       out.lerp(PAL.grassDark, smoothstep(0.5, 0.25, m) * 0.5)
       // Meadows shade from lush to sun-dried in wide drifts that ignore the provinces.
       out.lerp(PAL.grassDry, smoothstep(0.42, 0.68, fbm(x * 0.33, z * 0.33, 19, 3)) * 0.5 * smoothstep(0.3, 0.7, m))
+      // Heath: the meadow's palette variant, ochre and dry (its weight blends across its frayed border).
+      tmpHeath.copy(PAL.heath).lerp(PAL.heathDry, smoothstep(0.4, 0.7, n))
+      out.lerp(tmpHeath, smoothstep(-0.12, 0.12, pr.heath + fray('grassland', x, z) * 0.5))
       // A haze of the field's main flower, in drifts.
       if (pr.cell) {
         const bloom = fbm(x * 2.2, z * 2.2, 15, 3)
-        out.lerp(tmpFlower.set(flowersOf(pr.cell.q, pr.cell.r).main.color), smoothstep(0.55, 0.8, bloom) * 0.13)
+        out.lerp(tmpFlower.set(flowersOf(pr.cell.q, pr.cell.r, !!pr.cell.heath).main.color), smoothstep(0.55, 0.8, bloom) * 0.13)
       }
       return out
     }
     case 'forest':
-      return out.copy(PAL.forest).lerp(PAL.forestDark, smoothstep(0.35, 0.7, m))
+      out.copy(PAL.forest).lerp(PAL.forestDark, smoothstep(0.35, 0.7, m))
+      // Old wood: the same wood, darker (its weight blends across its frayed border like a terrain's).
+      tmpWood.copy(PAL.oldwood).lerp(PAL.oldwoodDark, smoothstep(0.35, 0.7, m))
+      return out.lerp(tmpWood, smoothstep(-0.12, 0.12, pr.dense + fray('forest', x, z) * 0.5))
     case 'mountain': {
       const crack = ridged(x * 5.5, z * 5.5, 13, 2)
+      // Heights here are measured from the terrace the range stands on (field.ts LEVEL_HEIGHT).
+      const rel = h - pr.terrace
       out.copy(PAL.rock).lerp(PAL.rockLight, smoothstep(0.5, 0.85, n) * 0.6)
       out.lerp(PAL.rockDark, smoothstep(0.75, 0.45, ny) * 0.6 + smoothstep(0.6, 0.9, crack) * 0.25)
       // Grassy foothills, scree on the shoulders, snow on gentle high ground.
-      out.lerp(PAL.grass, smoothstep(0.2, 0.04, h) * 0.75)
-      out.lerp(PAL.scree, smoothstep(0.25, 0.5, h) * smoothstep(0.9, 0.7, ny) * 0.25)
+      out.lerp(PAL.grass, smoothstep(0.2, 0.04, rel) * 0.75)
+      out.lerp(PAL.scree, smoothstep(0.25, 0.5, rel) * smoothstep(0.9, 0.7, ny) * 0.25)
+      // Hills are heath on their gentle ground, with rock where they steepen.
+      tmpHeath.copy(PAL.heath).lerp(PAL.heathDry, smoothstep(0.4, 0.7, n))
+      out.lerp(tmpHeath, (1 - smoothstep(0.3, 1, pr.scale)) * smoothstep(0.5, 0.8, ny) * 0.9)
       // Snow lies in tongues and patches, not one sheet: a ragged snow line, rock showing through in streaks where the
       // slope steepens, and wind-packed blue-grey drifts among the fresh white.
-      const line = smoothstep(0.66, 0.86, h + 0.12 * (n - 0.5) + 0.1 * (m - 0.5))
+      const line = snowLine(pr, h, n, m)
       const cover = smoothstep(0.42, 0.7, ny) * (1 - 0.55 * smoothstep(0.62, 0.92, crack) * smoothstep(0.88, 0.62, ny))
       tmpSnow.copy(PAL.snow).lerp(PAL.snowShade, 0.5 * smoothstep(0.35, 0.75, fbm(x * 1.9, z * 1.9, 16, 2)) + 0.35 * smoothstep(0.8, 0.5, ny))
       out.lerp(tmpSnow, line * cover)
@@ -123,7 +147,7 @@ function surfaceColor(pr: Probe, x: number, z: number, ny: number, out: THREE.Co
 
 /** How much rock grain the shader adds: mountainsides and cliffs, not their grassy feet or snowcaps. */
 function rockiness(pr: Probe, ny: number): number {
-  const range = smoothstep(-0.05, 0.12, pr.sd.mountain) * smoothstep(0.08, 0.3, pr.height) * (1 - smoothstep(0.75, 0.95, pr.height))
+  const range = smoothstep(-0.05, 0.12, pr.sd.mountain) * smoothstep(0.08, 0.3, pr.height - pr.terrace) * (1 - snowLine(pr, pr.height, 0.5, 0.5))
   return Math.max(range, smoothstep(0.8, 0.55, ny) * 0.8)
 }
 

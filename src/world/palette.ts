@@ -12,6 +12,9 @@ export const PALETTE = {
   grassDry: col('#6c6a48'),
   forest: col('#2b3a2e'),
   forestDark: col('#1c271f'),
+  /** Old wood: forest, darker. Not in the brief: forest's shades taken down a step. */
+  oldwood: col('#1f2a22'),
+  oldwoodDark: col('#131b15'),
   rock: col('#5c6170'),
   rockDark: col('#3f434f'),
   rockLight: col('#858a96'),
@@ -32,4 +35,7 @@ export const PALETTE = {
   blight: col('#3e4a37'),
   blightDark: col('#2c3527'),
   blightLight: col('#56603a'),
+  /** Water: shallow and deep, a deep slate-teal at dusk. */
+  water: col('#2e4a55'),
+  waterDeep: col('#1d2f38'),
 }

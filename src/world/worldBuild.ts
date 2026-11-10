@@ -75,10 +75,15 @@ interface Reads {
 }
 
 const isBusy = (c: WorldCell) => !!c.landmark
-/** What must match for an update: the same world (warp seed and hexes) with the same terrains on it. */
+/**
+ * What must match for an update: the same world (warp seed and hexes) with the same terrains on it, and every hex at
+ * the same level and variant (the field's level and variant borders are built once; only terrain flips are patched).
+ */
 const shapeOf = (board: Board) => {
   const present = [...new Set(Object.values(board).map((c) => c.terrain))].sort().join()
-  return `${warpSeedOf(board)}|${Object.keys(board).sort().join(' ')}|${present}`
+  const keys = Object.keys(board).sort()
+  const levels = keys.map((k) => `${board[k].level}${board[k].heath ? 'h' : ''}${board[k].dense ? 'd' : ''}`).join('')
+  return `${warpSeedOf(board)}|${keys.join(' ')}|${present}|${levels}`
 }
 
 /**

@@ -1,6 +1,6 @@
 // Copied from helikos-labs/rift-and-root@7f00e23 src/board3d/materials.ts, adapted for Tenth Dusk.
 // Shader work for the 3D board. The terrain is a MeshStandardMaterial (so it lights and takes shadows like everything
-// else) patched to draw target and hover rims and pulsing Blight veins, read per province from a small state texture.
+// else) patched to draw target and hover rims, read per province from a small state texture.
 // Water has its own material: moving ripples, depth colour, shore foam and a sun glint. `windPatch` sways instanced
 // plants.
 //
@@ -11,6 +11,7 @@
 import * as THREE from 'three'
 import type { WorldCell } from './adapter.ts'
 import { makeWarp, rimRay, type Bounds, type Rect } from './field.ts'
+import { PALETTE } from './palette.ts'
 
 /** Texels per hex in the state texture. */
 export const TEXELS = 2
@@ -392,7 +393,6 @@ float rr_ink = (1.0 - smoothstep(rr_half - 0.5 * rr_px, rr_half + 0.5 * rr_px, r
 rr_ink *= (rr_land ? smoothstep(0.03, 0.12, vCoast) : 0.0) * (1.0 - 0.45 * smoothstep(3.0, 9.0, ${INK_WIDTH.toFixed(4)} / rr_px));
 float rr_lum = dot(diffuseColor.rgb, vec3(0.2126, 0.7152, 0.0722));
 diffuseColor.rgb *= 1.0 - rr_ink * mix(0.24, 0.14, smoothstep(0.15, 0.6, rr_lum));
-bool rr_blight = abs(rr_s1.a - 0.625) < 0.06;
 // A target province takes a faint wash of the hint, inside its whole outline.
 if (rr_s0.r > 0.5) diffuseColor.rgb = mix(diffuseColor.rgb, uHint, 0.12 * (1.0 - smoothstep(0.0, 0.5, rr_rim)));
 diffuseColor.rgb *= 1.0 - rr_cloud(vWPos.xz, uTime);`,
@@ -427,14 +427,6 @@ if (rr_snow > 0.01) {
       .replace(
         '#include <emissivemap_fragment>',
         `#include <emissivemap_fragment>
-// Pulsing Blight veins.
-if (rr_blight) {
-  float n = 1.0 - abs(rr_snoise(vWPos.xz * 1.7 + vec2(uTime * 0.03, -uTime * 0.02)));
-  float n2 = 1.0 - abs(rr_snoise(vWPos.xz * 4.1 - vec2(uTime * 0.05, 0.0)));
-  float vein = smoothstep(0.965, 0.997, n) + 0.3 * smoothstep(0.972, 0.997, n2);
-  float pulse = 0.45 + 0.55 * sin(uTime * 2.2 + vWPos.x * 1.7 + vWPos.z);
-  totalEmissiveRadiance += vec3(0.85, 0.15, 0.78) * vein * pulse * 0.6;
-}
 // Target hint: a gilt rim that breathes. Hover: green for legal, red for not. Both run round the whole outline, along
 // the coast too where a rim province meets the sea.
 if (rr_s0.r > 0.5) {
@@ -448,9 +440,15 @@ if (rr_s0.g > 0.25) {
 }`,
       )
   }
-  mat.customProgramCacheKey = () => 'td-terrain-organic-1'
+  mat.customProgramCacheKey = () => 'td-terrain-organic-2'
   return mat
 }
+
+/** A colour as a GLSL vec3 (its linear working-space values, as the shaders work in). */
+const glsl = (c: THREE.Color) => `vec3(${c.r.toFixed(4)}, ${c.g.toFixed(4)}, ${c.b.toFixed(4)})`
+/** What the water reflects at grazing angles, and its shore foam: muted to the dusk. */
+const DUSK_SKY = new THREE.Color('#6f7f8c')
+const FOAM = new THREE.Color('#7f8b8d')
 
 export interface WaterUniforms {
   uTime: { value: number }
@@ -515,17 +513,18 @@ void main() {
   vec3 v = normalize(cameraPosition - vWPos);
   float fres = pow(1.0 - max(dot(n, v), 0.0), 4.0);
   float deep = smoothstep(0.02, 0.26, vDepth);
-  vec3 shallow = vec3(0.24, 0.55, 0.58);
-  vec3 deepc = vec3(0.05, 0.19, 0.30);
+  // Dusk water (palette.ts): deep slate-teal, darker with depth, catching a dim evening sky at grazing angles.
+  vec3 shallow = ${glsl(PALETTE.water)};
+  vec3 deepc = ${glsl(PALETTE.waterDeep)};
   vec3 col = mix(shallow, deepc, deep);
-  vec3 sky = vec3(0.70, 0.82, 0.92);
+  vec3 sky = ${glsl(DUSK_SKY)};
   col = mix(col, sky, fres * 0.65);
   vec3 r = reflect(-v, n);
   float spec = pow(max(dot(r, normalize(uSun)), 0.0), 180.0) * 2.4 + pow(max(dot(r, normalize(uSun)), 0.0), 18.0) * 0.12;
   col += vec3(1.0, 0.95, 0.85) * spec;
   // Foam along the shore, broken up by noise.
   float foam = (1.0 - smoothstep(0.0, 0.035, vDepth)) * smoothstep(-0.2, 0.6, rr_snoise(vWPos.xz * 9.0 + uTime * 0.4));
-  col = mix(col, vec3(0.93, 0.96, 0.95), foam * 0.75);
+  col = mix(col, ${glsl(FOAM)}, foam * 0.75);
   float alpha = mix(0.5, 0.93, deep) + foam * 0.3;
   // A lake's markers, as on land, along its meandering border; a lake that opens into the sea is closed off where the
   // board ends. A land province stops at its coast, so the sea carries none of its marks.

@@ -283,8 +283,9 @@ test('a lone Mountain is a short ridge along the grain, not a single cone', () =
 
 test('summits round off: no Mountain vertex stands as a needle above its neighbours', () => {
   // The phone's triangle lattice, as the mesh samples it, round the origin; at each summit (higher than its 6
-  // neighbours, all on the board: see onBoard), how far it stands above their mean. Before the polish pass the middle
-  // summit stood 0.15 above them, one in a hundred over 0.4 and the sharpest near 0.6.
+  // neighbours, all on the board: see onBoard, and over 0.6 above the terrace it stands on), how far it stands above
+  // their mean. Before the polish pass the middle summit stood 0.15 above them, one in a hundred over 0.4 and the
+  // sharpest near 0.6.
   const step = 0.113
   const rowH = (step * Math.sqrt(3)) / 2
   const n = Math.ceil(8 / step)
@@ -302,7 +303,7 @@ test('summits round off: no Mountain vertex stands as a needle above its neighbo
       const p = f.probe(x, z)
       on[id(i, j)] = onBoard(f, VALLEY, x, z) ? 1 : 0
       H[id(i, j)] = p.height
-      M[id(i, j)] = on[id(i, j)] && p.ground === 'mountain' && p.height > 0.6 ? 1 : 0
+      M[id(i, j)] = on[id(i, j)] && p.ground === 'mountain' && p.height - p.terrace > 0.6 ? 1 : 0
     }
   for (let j = 1 - m; j < m; j++)
     for (let i = 1 - n; i < n; i++) {
@@ -324,12 +325,13 @@ test('summits round off: no Mountain vertex stands as a needle above its neighbo
 
 test(
   'summits round off across the whole valley: no Mountain vertex stands as a needle above its neighbours',
-  { todo: 'Task 9: thick massifs exceed the summit thresholds' },
   () => {
-    // The corner pin above, over every mountain vertex on the board (see onBoard). Measured at 7f00e23's engine:
-    // 1,367 summits, the middle 0.135 above its neighbours, one in a hundred 0.385, the sharpest 0.447 (thresholds
-    // 0.13, 0.34, 0.45). Deep inside VALLEY's thick ranges the spires term (smoothstep(0.35, 1.25, dmc)) runs at full
-    // strength, which R&R's thin ranges never reached; summits far from the coast are as sharp as those near it.
+    // The corner pin above, over every mountain vertex on the board (see onBoard), with the same thresholds. At
+    // 7f00e23's engine: 1,367 summits, the middle 0.135 above its neighbours, one in a hundred 0.385, the sharpest
+    // 0.447. The sharp ones were crests of the ridged crags (not the spires) where VALLEY's thick ranges hold the body
+    // whole; with the knee lowered there (field.ts SUMMIT.deep): 1,330 summits, 0.083, 0.306 and 0.422. "High ground"
+    // is measured from the terrace (height − terrace > 0.6), as in the corner pin: a cliff's top edge at 0.8 is no
+    // summit of the range.
     const step = 0.113
     const rowH = (step * Math.sqrt(3)) / 2
     const centres = Object.values(VALLEY).map((c) => hexCenter(c.q, c.r))
@@ -352,7 +354,7 @@ test(
         const p = f.probe(x, z)
         on[id(i, j)] = onBoard(f, VALLEY, x, z) ? 1 : 0
         H[id(i, j)] = p.height
-        M[id(i, j)] = on[id(i, j)] && p.ground === 'mountain' && p.height > 0.6 ? 1 : 0
+        M[id(i, j)] = on[id(i, j)] && p.ground === 'mountain' && p.height - p.terrace > 0.6 ? 1 : 0
       }
     for (let j = 1; j < m; j++)
       for (let i = 1; i < n; i++) {

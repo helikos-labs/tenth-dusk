@@ -255,14 +255,51 @@ class Border {
 }
 const CELL = 0.5
 
+/**
+ * A region's border split by the size of the level step across each segment (§6): `cliffs` where the levels on the two
+ * sides differ by 2 or more, `steps` where they differ by 1. Each threshold k (level ≥ k) has one.
+ */
+interface LevelBorder {
+  cliffs: Border
+  steps: Border
+}
+
 /** Terrain heights over the region profile. */
 const MOUNTAIN_HEIGHT = 1.25
 const LAKE_DEPTH = 0.3
 const SEA_DEPTH = 0.34
 /** Foothills: how high the ground swells at a range's foot (and how far the swell spills onto its neighbours). */
 const FOOTHILL = 0.07
-/** Mountain height above `knee` is eased towards at most knee + span, so summits round off instead of spiking. */
-const SUMMIT = { knee: 1.1, span: 0.55 }
+/**
+ * Mountain height above `knee` is eased towards at most knee + span, so summits round off instead of spiking. The knee
+ * comes down by up to `deep` between depths 0.5 and 1.2 into a range, where a thick massif holds its body whole.
+ */
+const SUMMIT = { knee: 1.1, span: 0.55, deep: 0.35 }
+
+/**
+ * Height levels (§6). Each hex stands on a terrace at `LEVEL_HEIGHT` of its level: 0 lowland, 1 hills, 2 mountain. Peaks
+ * (3) have no terrace of their own: they reach their height through the mountain profile, scaled by `PEAK_SCALE`.
+ */
+export const LEVEL_HEIGHT = [0, 0.35, 0.8, 0] as const
+/** The mountain profile's scale on peaks (level 3). */
+export const PEAK_SCALE = 3
+/** A jump of 2 or more levels is a sheer face: it rises over `width` (world units), centred on the drawn border. */
+export const CLIFF = { width: 0.12 } as const
+/** A 1-level step blends over this far either side of the border: the foothills' spill onto their neighbours. */
+const STEP_BAND = 0.5
+/**
+ * The mountain profile's scale on each level: hills 0.3 (low, rounded), mountain 1, peaks `PEAK_SCALE`. Level 0 takes
+ * the hills' share; no mountain hex stands there, but the blend across a hills border reads it.
+ */
+const PROFILE_SCALE = [0.3, 0.3, 1, PEAK_SCALE] as const
+/**
+ * The crest the mountain profile's crags reach (its noise at about its 95th percentile): the local maximum the peaks'
+ * snow line is measured against.
+ */
+const CRAG_TOP = 1.15
+
+/** How far a marsh pool sinks the ground below the source's sunken profile. */
+const MARSH_POOL = 0.1
 
 /** The direction (radians from the x axis towards z) ranges run in near a point: a grain that turns slowly across the board. */
 export const grain = (x: number, z: number) => 0.6 + (fbm(x * 0.12, z * 0.12, 51, 2) - 0.5) * 2.4
@@ -421,6 +458,15 @@ export interface Probe {
   coast: number
   /** How much the nearby coast is a cliff (0 beach, 1 cliff). */
   cliff: number
+  /** Signed distance to the border of the heath provinces and of the old wood (dense forest), positive inside. */
+  heath: number
+  dense: number
+  /** The terrace the point stands on (`LEVEL_HEIGHT`, blended across level borders), included in `height`. */
+  terrace: number
+  /** The mountain profile's scale here (`PROFILE_SCALE`, blended the same way): 0.3 hills, 1 mountain, 3 peaks. */
+  scale: number
+  /** The local maximum: the height the range's crests reach here (the height itself off the mountains). */
+  top: number
   height: number
 }
 
@@ -556,6 +602,56 @@ export function buildField(board: Record<string, WorldCell>, seed = warpSeedOf(b
     }
     regions.set(t, new Border(segs, t === 'mountain' ? 1.6 : 1.0))
   }
+  // Level borders (§6): for each threshold k, the edges between a hex at level k or above and one below it, split into
+  // cliffs (a jump of 2 or more) and steps (a jump of 1). Like the regions, the board's outline is no border.
+  const levels: LevelBorder[] = [1, 2, 3].map((k) => {
+    const cliffs: Segment[] = []
+    const steps: Segment[] = []
+    for (const c of cells) {
+      if (c.level < k) continue
+      const ctr = hexCenter(c.q, c.r)
+      EDGE_DIR.forEach((d, i) => {
+        const nb = at(c.q + d.q, c.r + d.r)
+        if (!nb || nb.level >= k) return
+        const a = corner(ctr, i)
+        const b = corner(ctr, i + 1)
+        ;(c.level - nb.level >= 2 ? cliffs : steps).push({ ax: a.x, az: a.z, bx: b.x, bz: b.z })
+      })
+    }
+    return { cliffs: new Border(cliffs, CLIFF.width / 2), steps: new Border(steps, STEP_BAND) }
+  })
+  /** Province variants with their own colours and plants: heath (a grassland) and old wood (a dense forest). */
+  const variant = (has: (c: WorldCell) => boolean) => {
+    const segs: Segment[] = []
+    for (const c of cells) {
+      if (!has(c)) continue
+      const ctr = hexCenter(c.q, c.r)
+      EDGE_DIR.forEach((d, i) => {
+        const nb = at(c.q + d.q, c.r + d.r)
+        if (!nb || has(nb)) return
+        const a = corner(ctr, i)
+        const b = corner(ctr, i + 1)
+        segs.push({ ax: a.x, az: a.z, bx: b.x, bz: b.z })
+      })
+    }
+    return new Border(segs, 1.0)
+  }
+  const heathBorder = variant((c) => !!c.heath)
+  const denseBorder = variant((c) => !!c.dense)
+  /**
+   * How far the point at warped position wq, in `cell`, has risen to threshold k: 1 well inside the hexes at level k or
+   * above, 0 well outside, 0.5 on the border. Across a cliff it turns over CLIFF.width, across a step over STEP_BAND
+   * either side; where the two meet, inside takes the lower and outside the higher, so it stays continuous.
+   */
+  const rise = (k: number, cell: WorldCell | null, wq: Pt): number => {
+    const { cliffs, steps } = levels[k - 1]
+    const dc = cliffs.distance(wq.x, wq.z)
+    const ds = steps.distance(wq.x, wq.z)
+    const c = CLIFF.width / 2
+    if (cell && cell.level >= k) return Math.min(smoothstep(-c, c, dc), smoothstep(-STEP_BAND, STEP_BAND, ds))
+    return Math.max(smoothstep(-c, c, -dc), smoothstep(-STEP_BAND, STEP_BAND, -ds))
+  }
+
   /** Mountain hexes with no Mountain beside them: each is drawn as a short ridge rather than a lone cone. */
   const lone = new Set(cells.filter((c) => c.terrain === 'mountain' && EDGE_DIR.every((d) => at(c.q + d.q, c.r + d.r)?.terrain !== 'mountain')))
 
@@ -699,7 +795,19 @@ export function buildField(board: Record<string, WorldCell>, seed = warpSeedOf(b
     const coast = ground === 'sea' ? 0 : s
     // Stretches of the coast are cliffs: the land holds its height to the edge and the sea is deep below it.
     const cliff = smoothstep(0.5, 0.62, fbm((x + sx) * 0.35, (z + sz) * 0.35, 71, 2))
-    const p: Probe = { w, cell, ground, sd, s, lake, coast, cliff, height: 0 }
+    const hd = heathBorder.distance(wq.x, wq.z)
+    const dd = denseBorder.distance(wq.x, wq.z)
+    const heath = cell?.heath ? hd : -hd
+    const dense = cell?.dense ? dd : -dd
+    // The terrace and the profile's scale, summed over the level thresholds each point has risen past.
+    let terrace = 0
+    let scale = PROFILE_SCALE[0]
+    for (let k = 1; k <= 3; k++) {
+      const r = rise(k, cell, wq)
+      terrace += (LEVEL_HEIGHT[k] - LEVEL_HEIGHT[k - 1]) * r
+      scale += (PROFILE_SCALE[k] - PROFILE_SCALE[k - 1]) * r
+    }
+    const p: Probe = { w, cell, ground, sd, s, lake, coast, cliff, heath, dense, terrace, scale, top: 0, height: 0 }
     p.height = heightOf(x, z, p)
     return p
   }
@@ -735,6 +843,9 @@ export function buildField(board: Record<string, WorldCell>, seed = warpSeedOf(b
     let h = (roll + lift) * shore - 0.025 * (1 - shore)
     // Relief fades out right at the water so shores stay continuous.
     const relief = smoothstep(0, 0.12, Math.min(p.lake, p.coast))
+    // The terrace of the point's level (§6), down to the water at a shore: a cut bank.
+    p.terrace *= relief
+    h += p.terrace
     const foot = FOOTHILL * (0.5 + fbm(x * 1.6, z * 1.6, 9, 2))
     const dm = sd.mountain
     if (dm > 0) {
@@ -751,18 +862,33 @@ export function buildField(board: Record<string, WorldCell>, seed = warpSeedOf(b
       const spires = 0.2 * smoothstep(0.35, 1.25, dmc) * softRidged(x * 3.4 + 7, z * 3.4, 6, 1, 3, 0.5)
       if (p.cell && lone.has(p.cell)) body = loneBody(p.cell, p.w, dmc)
       // Where the noise peaks line up, a summit would shoot up as a needle; heights above the knee rise ever more
-      // slowly, which rounds those tops (a crest at 1.5 loses only 0.06; one at 2 is held to 1.61).
-      const m = MOUNTAIN_HEIGHT * body * crags + spires
-      h += relief * (foot + (m > SUMMIT.knee ? SUMMIT.knee + SUMMIT.span * Math.tanh((m - SUMMIT.knee) / SUMMIT.span) : m))
+      // slowly, which rounds those tops (a crest at 1.5 loses only 0.06; one at 2 is held to 1.61). Deep in a thick
+      // massif, where the body is whole and the crags reach their full height, the knee comes down (SUMMIT.deep).
+      // Peaks keep their crests: an impassable wall should read jagged, so the rounding fades out from mountain to
+      // peaks (`wall`).
+      const knee = SUMMIT.knee - SUMMIT.deep * smoothstep(0.5, 1.2, dmc)
+      const wall = smoothstep(1, PEAK_SCALE, p.scale)
+      const summit = (m: number) => (m > knee ? m + (knee + SUMMIT.span * Math.tanh((m - knee) / SUMMIT.span) - m) * (1 - wall) : m)
+      // The profile is scaled by level: low hills, mountains, and peaks PEAK_SCALE times as tall.
+      const crest = MOUNTAIN_HEIGHT * body * CRAG_TOP + spires
+      p.top = h + relief * (foot + p.scale * summit(crest))
+      h += relief * (foot + p.scale * summit(MOUNTAIN_HEIGHT * body * crags + spires))
+      if (p.top < h) p.top = h
     } else {
       // Foothills spill out over the neighbouring land.
       h += relief * foot * (1 - smoothstep(0, 0.5, -dm))
     }
     if (ground === 'blight') {
-      h += smoothstep(0, 0.25, sd.blight) * (-0.035 + 0.05 * ridged(x * 3.2, z * 3.2, 8, 2))
+      // Marsh: the source's sunken Blight ground, with pools where it drops below the water (the water mesh fills them),
+      // kept clear of the hex centre where the hero stands. Like the relief, it fades out at a shore, so marsh meets a
+      // lake or the sea without a step.
+      const c = p.cell ? hexCenter(p.cell.q, p.cell.r) : p.w
+      const pool = smoothstep(0.5, 0.68, fbm(x * 1.9, z * 1.9, 17, 2)) * smoothstep(0.35, 0.6, Math.hypot(p.w.x - c.x, p.w.z - c.z))
+      h += relief * smoothstep(0, 0.25, sd.blight) * (-0.035 + 0.05 * ridged(x * 3.2, z * 3.2, 8, 2) - MARSH_POOL * pool)
     } else if (ground === 'forest') {
       h += 0.035 * smoothstep(0, 0.4, sd.forest)
     }
+    if (dm <= 0) p.top = h
     return h
   }
 
