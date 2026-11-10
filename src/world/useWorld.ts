@@ -7,6 +7,7 @@
 import { useThree } from '@react-three/fiber'
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type * as THREE from 'three'
+import { TEST, hooks } from '../testHooks.ts'
 import type { WorldCell } from './adapter.ts'
 import { makeWarpTexture, warpBoxUniform, type FogUniforms } from './materials.ts'
 import { applyTerrain, type TerrainGeometry } from './terrainMesh.ts'
@@ -19,7 +20,7 @@ export const SMALL_SCREEN = typeof window !== 'undefined' && (window.matchMedia?
 
 /**
  * Mesh and plant density for this device: 1 on desktops; 0.75 on phones and small or few-core screens (`small`,
- * Board3D's SMALL_SCREEN); 0.6 on weak phones, told apart cheaply: a small screen with at most 4 cores and a pixel
+ * SMALL_SCREEN); 0.6 on weak phones, told apart cheaply: a small screen with at most 4 cores and a pixel
  * ratio of at most 2 (budget hardware), or a browser that reports 2 GB of memory or less. `?detail=` (0.5 to 1)
  * overrides it, to look at a tier on a desktop.
  */
@@ -83,7 +84,7 @@ export interface World {
  * The world from `client`'s updates: each is swapped into the meshes in place (or the first one wrapped), the warp the
  * worker baked goes into `uniforms.uWarp`, and `changed` is called after each. Timings go to `window.__world3d` for
  * browser checks: when the first board went to the worker and when its world was applied (performance.now()), and
- * each update's cost; Board3D adds when the world first showed (`revealed`).
+ * each update's cost (with ?test=1 only, R6); the scene adds when the world first showed (`revealed`).
  */
 export function useWorld(
   client: WorldClient,
@@ -97,7 +98,7 @@ export function useWorld(
   const live = useRef<TerrainGeometry | null>(null)
   const [timings] = useState(() => ({ sent: 0, shown: 0, revealed: 0, updates: [] as Timing[] }))
   useEffect(() => {
-    ;(window as unknown as { __world3d?: typeof timings }).__world3d = timings
+    if (TEST) hooks.__world3d = timings
   }, [timings])
   const apply = useRef<(u: WorldUpdate) => void>(() => {})
   useLayoutEffect(() => {

@@ -1,7 +1,10 @@
 // Smoke test (§17): the built app renders the zone's world at phone size. Serves dist/ with `vite preview`, opens it at
 // 390 × 844 in Chromium on SwiftShader, waits for window.__worldReady (exposed with ?test=1, R4 and R6), and fails on
 // any console error or page error, or when the canvas's centre 50 × 50 pixels are all one colour. Saves
-// tests/e2e/out/world.png. Run after `npm run build`: node tests/e2e/smoke.mjs
+// tests/e2e/out/world.png. Then checks the default zoom (the hero's hex is at least 44 CSS px wide and tall, §1 S4),
+// taps a hex 2 away twice (a preview, then a walk) and checks that the hero moved and the steps left dropped; with a
+// new preview showing where the steps left allow one, saves tests/e2e/out/walk.png (and the first preview,
+// preview.png). Run after `npm run build`: node tests/e2e/smoke.mjs
 // Requires Playwright with Chromium installed outside the app (not a dependency of it): `require('playwright')` must
 // resolve, as it does in the cloud sessions' environment (NODE_PATH points at the pre-installed copy).
 import { spawn } from 'node:child_process'
@@ -96,6 +99,59 @@ try {
   mkdirSync(OUT, { recursive: true })
   await page.screenshot({ path: join(OUT, 'world.png') })
   console.log(`saved ${join(OUT, 'world.png')}`)
+
+  // The default zoom (§1 S4): the hero's hex on screen, its width (between its centre and its neighbour's in the
+  // row) and its height (corner to corner), at least 44 CSS px.
+  const at = await page.evaluate(() => window.__run.at)
+  const hex = await page.evaluate(({ row, col }) => {
+    const d = (a, b) => Math.hypot(a[0] - b[0], a[1] - b[1])
+    const p = window.__project
+    return { width: d(p(row, col), p(row, col + 1)), height: d(p(row, col, 0, -1), p(row, col, 0, 1)) }
+  }, at)
+  console.log(`hero's hex at the default zoom: ${hex.width.toFixed(1)} × ${hex.height.toFixed(1)} CSS px`)
+  if (Math.min(hex.width, hex.height) < 44) fail(`a hex is under 44 px at the default zoom (${hex.width.toFixed(1)} × ${hex.height.toFixed(1)})`)
+
+  // Tap a hex 2 away (the first that previews a path), then tap it again: the hero walks there.
+  const cube = ({ row, col }) => {
+    const q = col + (row + (row & 1)) / 2
+    return [q, -row, row - q]
+  }
+  const dist = (a, b) => Math.max(...cube(a).map((v, i) => Math.abs(v - cube(b)[i])))
+  const twoAway = (from) => {
+    const out = []
+    for (let row = from.row - 2; row <= from.row + 2; row++)
+      for (let col = from.col - 3; col <= from.col + 3; col++) if (dist(from, { row, col }) === 2) out.push({ row, col })
+    return out
+  }
+  const tapUntilPreview = async (from) => {
+    for (const o of twoAway(from)) {
+      await page.evaluate(({ row, col }) => window.__tap(row, col), o)
+      await page.waitForTimeout(200)
+      const n = await page.evaluate(() => window.__preview?.length ?? 0)
+      if (n > 1) return o
+    }
+    return null
+  }
+  const before = await page.evaluate(() => ({ hero: window.__heroAt(), steps: window.__run.steps }))
+  const target = await tapUntilPreview(at)
+  if (!target) throw new Error('no hex 2 away shows a path preview')
+  await page.waitForTimeout(800)
+  await page.screenshot({ path: join(OUT, 'preview.png') })
+  await page.evaluate(({ row, col }) => window.__tap(row, col), target)
+  await page.waitForFunction(({ row, col }) => window.__run.at.row === row && window.__run.at.col === col, target, { timeout: 30_000, polling: 100 })
+  // The last move's walk, and a frame or two.
+  await page.waitForTimeout(1500)
+  const after = await page.evaluate(() => ({ hero: window.__heroAt(), steps: window.__run.steps }))
+  const moved = Math.hypot(after.hero[0] - before.hero[0], after.hero[2] - before.hero[2])
+  console.log(`walked to ${target.row},${target.col}: hero moved ${moved.toFixed(2)} units, steps ${before.steps} → ${after.steps}`)
+  if (moved < 1) fail(`the hero did not move (${moved.toFixed(2)} units)`)
+  if (!(after.steps < before.steps)) fail(`the steps left did not drop (${before.steps} → ${after.steps})`)
+
+  // A new preview from where the hero stands, for the picture.
+  if (!(await tapUntilPreview(target))) console.log('no further preview from there (picture without a path)')
+  await page.waitForTimeout(800)
+  await page.screenshot({ path: join(OUT, 'walk.png') })
+  console.log(`saved ${join(OUT, 'walk.png')}`)
   code = errors.length ? 1 : 0
 } catch (e) {
   fail(String(e?.stack ?? e))

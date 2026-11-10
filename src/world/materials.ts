@@ -50,7 +50,7 @@ export const slotOf = (q: number, r: number) => (r - SLOT_CENTRE.r + SLOT_OFFSET
  * Per-hex state, three RGBA texels per hex slot:
  *   texel 0: r = target hint, g = hover (0.5 illegal, 1 legal), b and a unused (0)
  *   texel 1: r unused (0), g = landmark, b = selected, a = (terrain id + 1) / 8 (0: no hex, the sea)
- *   texel 2: fog (fog.ts `fogByte`): r = fog state / 3, g = marker kind, b = sight-ring highlight, a = wall
+ *   texel 2: fog (fog.ts `fogByte`): r = fog state / 3, g = marker kind, b = reachable highlight, a = wall
  */
 export function makeStateTexture(count: number): THREE.DataTexture {
   const data = new Uint8Array(Math.max(1, count) * TEXELS * 4)
@@ -499,11 +499,36 @@ export interface TerrainUniforms {
   uSun: { value: THREE.Vector3 }
   /** The zone's bounds without its wall ring (field.ts `bounds.inner`: min x, min z, max x, max z), for the walls' fog. */
   uInner: { value: THREE.Vector4 }
+  /** The camera cutaway (`cutHeight`): the hero's feet (x, y, z) and the slope of the camera's view down to them (w). */
+  uCut: { value: THREE.Vector4 }
 }
 
 /** What the fog of war reads (`windPatch` for plants, mist.ts): the state texture, the province lookup and uInner. */
 export type FogUniforms = Pick<TerrainUniforms, 'uTime' | 'uState' | 'uStateSize' | 'uRect' | 'uRim' | 'uWarp' | 'uWarpBox' | 'uInner'>
 
+
+/**
+ * The camera cutaway: ground between the follow camera and the hero that would rise into the view of the hero's feet
+ * is cut down to a plane CUT.drop under that view, sloping up toward the camera as the view does (uCut: the hero's
+ * feet, and the view's slope). The walls behind a hero standing by the zone's near edge (peaks over 4 high, a hex
+ * away) would hide them otherwise. The cut fades in over CUT.fade toward the camera, and never touches ground beyond
+ * the hero.
+ */
+export const CUT = { drop: 0.15, fade: 0.5 }
+/** No cutaway: a focus so high that nothing is cut. */
+export const NO_CUT = new THREE.Vector4(0, 1e4, 0, 0)
+
+/** How high the ground stands at world point (x, z) once cut away (`CUT`) as `cut` (uCut) says, given its height. */
+export function cutHeight(height: number, z: number, cut: THREE.Vector4): number {
+  const ahead = z - cut.z
+  const lim = cut.y - CUT.drop + ahead * cut.w
+  const t = Math.min(1, Math.max(0, ahead / CUT.fade))
+  const k = t * t * (3 - 2 * t)
+  return height + (Math.min(height, lim) - height) * k
+}
+
+/** The reachable highlight (texel 2 b): its colour, rim width (world units) and glow, and the wash inside it. */
+export const REACH_LOOK = { color: new THREE.Color('#ffb46a'), rim: 0.09, rimGlow: 0.55, wash: 0.035 }
 
 /** Width of the ink line along a province border, in world units (a hex is 2 across its corners). */
 const INK_WIDTH = 0.024
@@ -522,6 +547,7 @@ varying vec3 vWPos;
 varying float vRock;
 varying float vCoast;
 varying float vSink;
+uniform vec4 uCut;
 ${SINK_VERTEX_GLSL}`,
       )
       .replace(
@@ -529,15 +555,23 @@ ${SINK_VERTEX_GLSL}`,
         `#include <beginnormal_vertex>
 // Fog of war (R16): unseen and sunk land sinks to the flat fog floor, so no relief shows through; its normal turns up.
 float td_sink = td_sinkAt(position, aCoast);
-objectNormal = normalize(mix(objectNormal, vec3(0.0, 1.0, 0.0), td_sink));`,
+objectNormal = normalize(mix(objectNormal, vec3(0.0, 1.0, 0.0), td_sink));
+// The camera cutaway (CUT): ground rising into the camera's view of the hero is cut down to a plane under it; the cut
+// face's normal turns up.
+vec3 td_w = (modelMatrix * vec4(position, 1.0)).xyz;
+float td_ahead = td_w.z - uCut.z;
+float td_lim = uCut.y - ${CUT.drop.toFixed(3)} + td_ahead * uCut.w;
+float td_cutK = smoothstep(0.0, ${CUT.fade.toFixed(3)}, td_ahead);
+objectNormal = normalize(mix(objectNormal, vec3(0.0, 1.0, 0.0), td_cutK * smoothstep(td_lim - 0.05, td_lim + 0.05, td_w.y)));`,
       )
       .replace(
         '#include <begin_vertex>',
         `#include <begin_vertex>
 transformed.y = mix(transformed.y, ${FOG_FLOOR.toFixed(3)}, td_sink);
-vSink = td_sink;
+transformed.y = mix(transformed.y, min(transformed.y, td_lim), td_cutK);
+vSink = max(td_sink, td_cutK * smoothstep(td_lim - 0.05, td_lim + 0.05, td_w.y));
 vWPos = (modelMatrix * vec4(transformed, 1.0)).xyz;
-vRock = aRock * (1.0 - td_sink);
+vRock = aRock * (1.0 - vSink);
 vCoast = aCoast;`,
       )
     shader.fragmentShader = shader.fragmentShader
@@ -631,16 +665,23 @@ if (rr_snow > 0.01) {
       .replace(
         '#include <emissivemap_fragment>',
         `#include <emissivemap_fragment>
-// Target hint: a gilt rim that breathes. Hover: green for legal, red for not. Both run round the whole outline, along
-// the coast too where a rim province meets the sea.
+// Highlights show only on what is in sight (the in-sight share of the fog here), never on unseen, sunk or remembered
+// ground. Target hint: a gilt rim that breathes. Hover: green for legal, red for not. Both run round the whole outline,
+// along the coast too where a rim province meets the sea.
+float td_lit = rr_fog.w.w / td_sum(rr_fog);
 if (rr_s0.r > 0.5) {
   float pulse = 0.6 + 0.4 * sin(uTime * 3.4);
   float rim = 1.0 - smoothstep(0.0, 0.10, rr_rim);
-  totalEmissiveRadiance += uHint * (rim * pulse * 1.15 + 0.10 * (1.0 - smoothstep(0.0, 0.45, rr_rim)));
+  totalEmissiveRadiance += td_lit * uHint * (rim * pulse * 1.15 + 0.10 * (1.0 - smoothstep(0.0, 0.45, rr_rim)));
 }
 if (rr_s0.g > 0.25) {
   vec3 hc = rr_s0.g > 0.75 ? vec3(0.45, 1.0, 0.4) : vec3(1.0, 0.3, 0.2);
-  totalEmissiveRadiance += hc * (1.0 - smoothstep(0.0, 0.065, rr_rim)) * 1.1;
+  totalEmissiveRadiance += td_lit * hc * (1.0 - smoothstep(0.0, 0.065, rr_rim)) * 1.1;
+}
+// Reachable (texel 2 b, the hexes the steps left can reach): a soft, steady lantern-coloured rim and a faint wash.
+if (rr_state(rr_prov.slot, 2.0).b > 0.5) {
+  float rim = 1.0 - smoothstep(0.0, ${REACH_LOOK.rim.toFixed(3)}, rr_rim);
+  totalEmissiveRadiance += td_lit * ${glsl(REACH_LOOK.color)} * (rim * ${REACH_LOOK.rimGlow.toFixed(3)} + ${REACH_LOOK.wash.toFixed(3)});
 }`,
       )
       .replace(
@@ -650,7 +691,7 @@ if (rr_s0.g > 0.25) {
 gl_FragColor.rgb = mix(gl_FragColor.rgb, td_unseen(rr_fog.w.x > 0.0 ? td_mistNoise(vWPos.xz, uTime) : 0.0), rr_fog.w.x / td_sum(rr_fog));`,
       )
   }
-  mat.customProgramCacheKey = () => 'td-terrain-fog-2'
+  mat.customProgramCacheKey = () => 'td-terrain-fog-3'
   return mat
 }
 
@@ -757,15 +798,16 @@ void main() {
   // A lake's markers, as on land, along its meandering border; a lake that opens into the sea is closed off where the
   // board ends. A land province stops at its coast, so the sea carries none of its marks.
   RRProv prov = rr_province(vWPos.xz, false);
+  // Fog of war, as on the ground (the sea, no province, is the Hush); unseen and sunk water fades out, so the fog
+  // floor shows instead of a river's course (R16). Markers show only on water in sight.
+  TDFog fog = td_fogAt(prov);
   if (prov.slot >= 0.0 && prov.lake > 0.5) {
     float d = min(prov.d, prov.edge);
+    float lit = fog.w.w / td_sum(fog);
     vec4 s0 = texture2D(uState, vec2((prov.slot * ${TEXELS}.0 + 0.5) / uStateSize, 0.5));
-    if (s0.r > 0.5) col += uHint * (1.0 - smoothstep(0.0, 0.1, d)) * (0.6 + 0.4 * sin(uTime * 3.4)) * 1.1;
-    if (s0.g > 0.25) col += (s0.g > 0.75 ? vec3(0.45, 1.0, 0.4) : vec3(1.0, 0.3, 0.2)) * (1.0 - smoothstep(0.0, 0.065, d));
+    if (s0.r > 0.5) col += lit * uHint * (1.0 - smoothstep(0.0, 0.1, d)) * (0.6 + 0.4 * sin(uTime * 3.4)) * 1.1;
+    if (s0.g > 0.25) col += lit * (s0.g > 0.75 ? vec3(0.45, 1.0, 0.4) : vec3(1.0, 0.3, 0.2)) * (1.0 - smoothstep(0.0, 0.065, d));
   }
-  // Fog of war, as on the ground (the sea, no province, is the Hush); unseen and sunk water fades out, so the fog
-  // floor shows instead of a river's course (R16).
-  TDFog fog = td_fogAt(prov);
   col = td_tint(col, fog, vWPos.xz, fog.w.x > 0.0 ? td_mistNoise(vWPos.xz, uTime) : 0.0);
   alpha *= 1.0 - 0.95 * td_hidden(fog);
   gl_FragColor = vec4(col, clamp(alpha, 0.0, 1.0));
@@ -781,10 +823,12 @@ void main() {
  * board. `sway` scales it (trees 0.07, grass and flowers more; 0 for none). Given the fog's uniforms too, a plant reads
  * texel 2 of the province at its instance's origin (through the warp, as the ground does): unseen or sunk (its ground
  * sunk to the fog floor), it scales to nothing; otherwise it takes the ground's treatment of its state (remembered and
- * wall desaturated). Its shadow needs `plantDepthMaterials`.
+ * wall desaturated). Its shadow needs `plantDepthMaterials`. Given the camera cutaway's uniform (uCut) too, a plant
+ * standing on ground the cutaway lowers (CUT) scales to nothing, so none floats over the cut.
  */
 export function windPatch(mat: THREE.Material, uniforms: { uTime: { value: number } } & Partial<FogUniforms>, sway: number, key: string) {
   const fog = !!uniforms.uState
+  const cut = fog && !!(uniforms as { uCut?: unknown }).uCut
   mat.onBeforeCompile = (shader) => {
     Object.assign(shader.uniforms, fog ? uniforms : { uTime: uniforms.uTime })
     shader.fragmentShader = shader.fragmentShader
@@ -801,7 +845,9 @@ export function windPatch(mat: THREE.Material, uniforms: { uTime: { value: numbe
     shader.vertexShader = shader.vertexShader
       .replace(
         '#include <common>',
-        `#include <common>\nuniform float uTime;\nvarying vec3 rr_wpos;` + (fog ? `${FOG_UNIFORMS_GLSL}\nvarying vec4 rr_fog;\n${WARP_GLSL}\n${FOG_TEXEL_GLSL}` : ''),
+        `#include <common>\nuniform float uTime;\nvarying vec3 rr_wpos;` +
+          (fog ? `${FOG_UNIFORMS_GLSL}\nvarying vec4 rr_fog;\n${WARP_GLSL}\n${FOG_TEXEL_GLSL}` : '') +
+          (cut ? '\nuniform vec4 uCut;' : ''),
       )
       .replace(
         '#include <begin_vertex>',
@@ -823,6 +869,13 @@ export function windPatch(mat: THREE.Material, uniforms: { uTime: { value: numbe
   // Fog of war: the province at the instance's origin; an unseen or sunk plant (not on a wall) scales to nothing.
   rr_fog = td_fogOf(rr_hexOf((modelMatrix * vec4(rr_base, 1.0)).xz));
   if (rr_fog.a < 0.5 && rr_fog.r < 0.5) transformed *= 0.0;`
+            : '') +
+          (cut
+            ? `
+  // The camera cutaway: a plant on ground the cut lowers goes.
+  vec3 rr_o = (modelMatrix * vec4(rr_base, 1.0)).xyz;
+  float rr_ahead = rr_o.z - uCut.z;
+  if (rr_ahead > 0.0 && rr_o.y > uCut.y - ${CUT.drop.toFixed(3)} + rr_ahead * uCut.w - 0.02) transformed *= 0.0;`
             : ''),
       )
       .replace(
@@ -835,7 +888,7 @@ export function windPatch(mat: THREE.Material, uniforms: { uTime: { value: numbe
 #endif`,
       )
   }
-  mat.customProgramCacheKey = () => `rr-wind2-${key}${fog ? '-fog2' : ''}`
+  mat.customProgramCacheKey = () => `rr-wind2-${key}${fog ? '-fog2' : ''}${cut ? '-cut' : ''}`
 }
 
 /**
@@ -943,9 +996,10 @@ let shadowTarget: THREE.WebGLRenderTarget | null = null
 /**
  * Compiles depth materials as the shadow pass will draw with them: into a render target (which changes their programs:
  * no tone mapping, linear colour), with `scene`'s lights, each on a stand-in mesh of its kind and facing the side the
- * shadow pass gives it. `extra` adds a caster whose depth material is its own (its geometry and depth material).
+ * shadow pass gives it. `extra` adds casters whose depth material is their own: stand-ins drawn with that depth
+ * material as their material (an InstancedMesh for an instanced caster's), turned to the shadow pass's side too.
  */
-export function warmDepth(gl: THREE.WebGLRenderer, camera: THREE.Camera, scene: THREE.Scene, extra: [THREE.BufferGeometry, THREE.Material][] = []): Promise<unknown> {
+export function warmDepth(gl: THREE.WebGLRenderer, camera: THREE.Camera, scene: THREE.Scene, extra: THREE.Mesh[] = []): Promise<unknown> {
   const geo = new THREE.BufferGeometry()
   geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(9), 3))
   geo.setAttribute('normal', new THREE.BufferAttribute(new Float32Array(9), 3))
@@ -953,9 +1007,9 @@ export function warmDepth(gl: THREE.WebGLRenderer, camera: THREE.Camera, scene: 
   tinted.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(3), 3)
   const stand = new THREE.Group()
   stand.add(new THREE.Mesh(geo, DEPTH.plain), new THREE.InstancedMesh(geo, DEPTH.instanced, 1), tinted)
-  for (const [g, m] of extra) stand.add(new THREE.Mesh(g, m))
+  for (const m of extra) stand.add(m)
   // The shadow pass draws a caster whose own side is the front with the depth material's back.
-  for (const m of Object.values(DEPTH)) m.side = THREE.BackSide
+  for (const m of [...Object.values(DEPTH), ...extra.map((e) => e.material as THREE.Material)]) m.side = THREE.BackSide
   shadowTarget ??= new THREE.WebGLRenderTarget(1, 1)
   const was = gl.getRenderTarget()
   gl.setRenderTarget(shadowTarget)

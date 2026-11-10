@@ -10,7 +10,7 @@ import { TEXELS } from './materials.ts'
 const FOG_R = [0, 85, 170, 255] as const
 
 /**
- * Texel 2 of a hex: r = fog state, g = marker kind (none in M1), b = sight-ring highlight (set by `writeFog`),
+ * Texel 2 of a hex: r = fog state, g = marker kind (none in M1), b = reachable highlight (set by `writeFog`),
  * a = 255 for a wall hex (outside the zone).
  */
 export function fogByte(f: Fog, wall: boolean): [r: number, g: number, b: number, a: number] {
