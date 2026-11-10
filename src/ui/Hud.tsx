@@ -1,7 +1,7 @@
 // The HUD over the world (§5, §16): the top bar (the day with the sun's arc across it, the chapter, the ember), the
-// tracker, the blocked-tap chip and the bottom bar (vigour, the steps left, and Move · Camp · Pack · Journal). Move
-// walks the path previewed (as a second tap on its end does), or presses on into the night when no move is left by
-// day; Journal waits for a later milestone.
+// tracker, the chip (a blocked tap's, else what the rules just did, R24) and the bottom bar (vigour, the steps left,
+// and Move · Camp · Pack · Journal). Move walks the path previewed (as a second tap on its end does), or presses on into
+// the night when no move is left by day; Journal waits for a later milestone.
 import { useMemo } from 'react'
 import { LAST_DAY, NIGHT_STEPS, STEPS_PER_DAY, type RunState } from '../rules/run.ts'
 import type { Off } from '../rules/hex.ts'
@@ -13,6 +13,8 @@ interface HudProps {
   walking: boolean
   blocked: string | null
   blockedN: number
+  notice: string | null
+  noticeN: number
   act: (a: GameAction) => void
 }
 
@@ -32,7 +34,7 @@ function SunArc({ run }: { run: RunState }) {
   )
 }
 
-export default function Hud({ run, preview, walking, blocked, blockedN, act }: HudProps) {
+export default function Hud({ run, preview, walking, blocked, blockedN, notice, noticeN, act }: HudProps) {
   const beacons = useMemo(() => [...run.zone.cells.values()].filter((c) => c.landmark === 'beacon').length, [run.zone])
   const end = preview?.at(-1)
   const night = !end && !walking && canPressOn(run)
@@ -76,10 +78,16 @@ export default function Hud({ run, preview, walking, blocked, blockedN, act }: H
       </div>
       <div className="td-hud-foot">
         <div className="td-chip-slot" aria-live="polite">
-          {blocked && (
-            <span key={blockedN} className="td-chip">
+          {blocked ? (
+            <span key={`blocked-${blockedN}`} className="td-chip">
               {blocked}
             </span>
+          ) : (
+            notice && (
+              <span key={`notice-${noticeN}`} className="td-chip td-notice">
+                {notice}
+              </span>
+            )
           )}
         </div>
         <footer className="td-bottom td-glass" data-hud="bottom">

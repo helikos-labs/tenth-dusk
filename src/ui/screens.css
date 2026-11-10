@@ -341,7 +341,13 @@
   font-weight: 600;
   letter-spacing: 0.02em;
   box-shadow: 0 6px 20px rgba(0, 0, 0, 0.4);
+  max-width: 100%;
+  text-align: center;
   animation: td-chip 2.4s ease-in-out both;
+}
+/* What the rules did (R24): a longer line, shown longer (useGame NOTICE_MS). */
+.td-chip.td-notice {
+  animation-duration: 3.6s;
 }
 @keyframes td-chip {
   0% { opacity: 0; transform: translateY(6px); }

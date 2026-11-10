@@ -9,6 +9,8 @@
 //   5. a tap on a peaks wall hex the Hush hasn't taken (a seen one if any): the chip "Can't cross";
 //   6. Camp ("Read the stars" disabled, with its note, R23), Rest and Tend, "Sleep until dawn": "DAY 2 / 10" and
 //      "6 / 6";
+//   6b. the save edited so the Hush is 6 rows ahead, a reload, Continue, a camp: the hero is pushed off the sunk row
+//      and the chip tells it (R24); after a reload and Continue the chip does not show again; back to the title;
 //   7. at 360 × 640 the HUD's top bar, tracker and bottom bar don't overlap; at 844 × 390, "Turn your phone upright";
 //   8. corrupt text under the save key and a reload: "Start a new journey" shows and the text is set aside under
 //      `…corrupt`.
@@ -177,6 +179,41 @@ async function savedScreens(page, size) {
   await page.reload()
 }
 
+/**
+ * The save edited so the furthest row is 6 ahead of the hero (the Hush will take their row at dawn), then a camp: the
+ * hero is pushed, and the chip says so; after a reload and Continue it does not show again.
+ */
+async function pushed(page, size) {
+  const kept = await save(page)
+  await page.evaluate(({ k, text }) => {
+    const f = JSON.parse(text)
+    f.run.furthestRow = f.run.at.row + 6
+    localStorage.setItem(k, JSON.stringify(f))
+  }, { k: SAVE_KEY, text: kept })
+  await page.reload()
+  await press(page, 'Continue')
+  await worldReady(page)
+  const from = await page.evaluate(() => window.__run.at)
+  await press(page, 'Camp')
+  await page.getByRole('button', { name: /^Rest/ }).click()
+  await press(page, 'Sleep until dawn')
+  const line = 'The Hush rises · Ash wakes further on'
+  if (await shows(page, line)) pass(`chip after a dawn push: "${line}"`)
+  else fail(`no chip "${line}" after a dawn push`)
+  await shot(page, size, 'pushed', false)
+  const to = await page.evaluate(() => window.__run.at)
+  if (to.row > from.row) pass(`pushed from ${from.row},${from.col} to ${to.row},${to.col}`)
+  else fail(`the hero was not pushed (${from.row},${from.col} → ${to.row},${to.col})`)
+  await page.reload()
+  await press(page, 'Continue')
+  await worldReady(page)
+  await page.waitForTimeout(1500)
+  if (await page.locator('.td-notice').count()) fail('the push chip shows again after a reload')
+  else pass('no chip repeats after a reload')
+  // Back to the title, so this page's world stops drawing while the next page runs (SwiftShader is shared).
+  await page.reload()
+}
+
 /** A new journey without `&seed=`: its seed is fresh, 6 capitals and digits. */
 async function freshSeed(browser) {
   const context = await newContext(browser)
@@ -306,6 +343,9 @@ async function flow(browser, seed) {
   await shot(page, S, 'dawn')
 
   await savedScreens(page, S)
+
+  // 6b. A dawn push, told by a chip, once.
+  await pushed(page, S)
 
   // 7. A small phone, then landscape.
   const small = await context.newPage()

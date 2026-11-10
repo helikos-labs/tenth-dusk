@@ -6,6 +6,10 @@
 // Walking (§5.1): a first tap on a reachable hex previews its path; a second tap on the same hex walks it, a move
 // every STEP_SECONDS, until it arrives or the run refuses a move; taps are ignored mid-walk; a tap anywhere else
 // replaces the preview, or clears it and says why the hex can't be reached when the hero can tell.
+//
+// What the rules did (R24): after each change to the run, the newest event not yet told (notices.ts) shows in the
+// chip slot. `seen` counts the run's events already told; a continued save starts with all of them told, so nothing
+// shows twice after a reload. A blocked-tap chip takes the slot over.
 import { useCallback, useEffect, useReducer, useRef } from 'react'
 import { TERRAIN } from '../data/terrain.ts'
 import { CHAPTER1 } from '../data/book1.ts'
@@ -17,6 +21,7 @@ import { cellAt } from '../rules/zone.ts'
 import { STEP_SECONDS } from '../scenes/WorldScene.tsx'
 import { reachable } from '../scenes/reach.ts'
 import { TEST } from '../testHooks.ts'
+import { newestNotice } from './notices.ts'
 
 export type Screen = 'title' | 'name' | 'intro' | 'world' | 'camp' | 'pack' | 'end'
 
@@ -40,6 +45,10 @@ export interface Game {
   blocked: string | null
   /** Counts blocked taps: the chip is keyed on it, so a repeat tap shows it afresh. */
   blockedN: number
+  /** The line telling what the rules just did, or none (shown when no blocked-tap chip is). */
+  notice: string | null
+  /** Counts notices: their chip is keyed on it. */
+  noticeN: number
   /** The path preview, the hero's hex first, or none. */
   preview: Off[] | null
   /** True while the hero walks a path. */
@@ -53,6 +62,8 @@ export const NAME_MAX = 16
 export const DEFAULT_NAME = 'Wren'
 /** How long the blocked-tap chip shows. */
 const CHIP_MS = 2400
+/** How long a notice shows (the .td-notice animation in screens.css). */
+const NOTICE_MS = 3600
 
 /** The chip's copy for each reason a move is refused; notAdjacent and over say nothing. */
 const BLOCKED: Partial<Record<Extract<MoveCheck, { ok: false }>['reason'], string>> = {
@@ -122,11 +133,15 @@ interface State {
   blocked: string | null
   /** Counts blocked taps, so a second tap on a wall shows the chip again for its full time. */
   blockedN: number
+  notice: string | null
+  noticeN: number
+  /** How many of the run's events the player has been told of (or passed over). */
+  seen: number
   /** The save the title offers to continue. */
   saved: RunState | null
 }
 
-type Internal = GameAction | { t: 'started'; run: RunState } | { t: 'step' } | { t: 'unblock' }
+type Internal = GameAction | { t: 'started'; run: RunState } | { t: 'step' } | { t: 'unblock' } | { t: 'unnotice' }
 
 const storage = {
   get(k: string): string | null {
@@ -156,7 +171,10 @@ function boot(): State {
   const text = storage.get(SAVE_KEY)
   const loaded = load(text)
   if (!loaded.ok && loaded.reason !== 'empty' && text !== null) storage.set(`${SAVE_KEY}.corrupt`, text)
-  return { screen: 'title', run: null, preview: null, walk: null, blocked: null, blockedN: 0, saved: loaded.ok ? loaded.run : null }
+  return {
+    screen: 'title', run: null, preview: null, walk: null, blocked: null, blockedN: 0, notice: null, noticeN: 0, seen: 0,
+    saved: loaded.ok ? loaded.run : null,
+  }
 }
 
 /** The next move of a walk; it stops when the path ends, the run refuses the move, or the chapter ends. */
@@ -176,10 +194,20 @@ function tap(s: State, at: Off): State {
   if (s.preview && end && key(end) === key(at)) return step({ ...s, walk: s.preview.slice(1), blocked: null })
   const preview = reachable(s.run).get(key(at)) ?? null
   const blocked = preview ? null : blockedCopy(s.run, at)
-  return { ...s, preview, blocked, blockedN: s.blockedN + (blocked ? 1 : 0) }
+  return { ...s, preview, blocked, blockedN: s.blockedN + (blocked ? 1 : 0), notice: blocked ? null : s.notice }
 }
 
-function reduce(s: State, a: Internal): State {
+/** After a change: the newest event not yet told, as the notice; every event is told from then on. */
+function tell(s: State): State {
+  if (!s.run || s.run.events.length <= s.seen) return s
+  const notice = newestNotice(s.run.events, s.seen, s.run.hero.name)
+  const told = { ...s, seen: s.run.events.length }
+  return notice ? { ...told, notice, noticeN: s.noticeN + 1 } : told
+}
+
+const reduce = (s: State, a: Internal): State => tell(apply(s, a))
+
+function apply(s: State, a: Internal): State {
   const idle = s.screen === 'world' && !!s.run && !s.walk && s.run.status === 'walking'
   switch (a.t) {
     case 'new':
@@ -187,12 +215,15 @@ function reduce(s: State, a: Internal): State {
     case 'name':
       return s // started by `act`, which makes the run
     case 'started':
-      return s.screen === 'name' ? { ...s, screen: 'intro', run: a.run, saved: null, preview: null, walk: null, blocked: null } : s
+      return s.screen === 'name' ? { ...s, screen: 'intro', run: a.run, saved: null, preview: null, walk: null, blocked: null, notice: null, seen: 0 } : s
     case 'begin':
       return s.screen === 'intro' ? { ...s, screen: 'world' } : s
     case 'continue':
-      if (s.screen === 'title' && s.saved) return { ...s, run: s.saved, saved: null, screen: s.saved.status === 'walking' ? 'world' : 'end' }
-      if (s.screen === 'end') return { ...s, screen: 'title', run: null, saved: null, preview: null, walk: null, blocked: null }
+      if (s.screen === 'title' && s.saved) {
+        const screen = s.saved.status === 'walking' ? 'world' : 'end'
+        return { ...s, run: s.saved, saved: null, screen, notice: null, seen: s.saved.events.length }
+      }
+      if (s.screen === 'end') return { ...s, screen: 'title', run: null, saved: null, preview: null, walk: null, blocked: null, notice: null, seen: 0 }
       return s
     case 'tap':
       return tap(s, a.at)
@@ -200,6 +231,8 @@ function reduce(s: State, a: Internal): State {
       return step(s)
     case 'unblock':
       return { ...s, blocked: null }
+    case 'unnotice':
+      return { ...s, notice: null }
     case 'pressOn':
       return idle ? { ...s, run: pressOn(s.run!), preview: null, blocked: null } : s
     case 'openCamp':
@@ -258,5 +291,15 @@ export function useGame(): Game {
     return () => window.clearTimeout(t)
   }, [s.blocked, s.blockedN])
 
-  return { run: s.run, screen: s.screen, act, blocked: s.blocked, blockedN: s.blockedN, preview: s.preview, walking: !!s.walk, canContinue: !!s.saved }
+  // So does a notice.
+  useEffect(() => {
+    if (!s.notice) return
+    const t = window.setTimeout(() => dispatch({ t: 'unnotice' }), NOTICE_MS)
+    return () => window.clearTimeout(t)
+  }, [s.notice, s.noticeN])
+
+  return {
+    run: s.run, screen: s.screen, act, blocked: s.blocked, blockedN: s.blockedN, notice: s.notice, noticeN: s.noticeN, preview: s.preview,
+    walking: !!s.walk, canContinue: !!s.saved,
+  }
 }
