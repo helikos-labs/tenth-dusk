@@ -10,7 +10,7 @@ import { useCallback, useEffect, useReducer, useRef } from 'react'
 import { TERRAIN } from '../data/terrain.ts'
 import { CHAPTER1 } from '../data/book1.ts'
 import { generateZone } from '../rules/gen.ts'
-import { key, neighbours, type Off } from '../rules/hex.ts'
+import { key, type Off } from '../rules/hex.ts'
 import { camp, campOptions, canMove, move, newRun, path, pressOn, type MoveCheck, type NightAction, type RunState } from '../rules/run.ts'
 import { SAVE_KEY, load, serialise } from '../rules/save.ts'
 import { cellAt } from '../rules/zone.ts'
@@ -38,6 +38,8 @@ export interface Game {
   act: (a: GameAction) => void
   /** The blocked-tap chip's text, or none. */
   blocked: string | null
+  /** Counts blocked taps: the chip is keyed on it, so a repeat tap shows it afresh. */
+  blockedN: number
   /** The path preview, the hero's hex first, or none. */
   preview: Off[] | null
   /** True while the hero walks a path. */
@@ -85,9 +87,8 @@ export function blockedCopy(run: RunState, at: Off): string | null {
   return null
 }
 
-/** Whether the hero may press on into the night (rules/run.ts pressOn): by day, with no move affordable. */
-export const canPressOn = (run: RunState): boolean =>
-  run.status === 'walking' && !run.night && !neighbours(run.at).some((n) => canMove(run, n).ok)
+/** Whether the hero may press on into the night: whatever rules/run.ts pressOn allows (it changes the run). */
+export const canPressOn = (run: RunState): boolean => pressOn(run) !== run
 
 /**
  * A fresh 6-character seed for a new journey: uppercase letters and digits. With ?test=1, `&seed=` fixes it, so the
@@ -257,5 +258,5 @@ export function useGame(): Game {
     return () => window.clearTimeout(t)
   }, [s.blocked, s.blockedN])
 
-  return { run: s.run, screen: s.screen, act, blocked: s.blocked, preview: s.preview, walking: !!s.walk, canContinue: !!s.saved }
+  return { run: s.run, screen: s.screen, act, blocked: s.blocked, blockedN: s.blockedN, preview: s.preview, walking: !!s.walk, canContinue: !!s.saved }
 }

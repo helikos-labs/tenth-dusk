@@ -126,7 +126,7 @@ const tapPeaksWall = (page) =>
 async function savedScreens(page, size) {
   const kept = await save(page)
   const variants = [
-    ['night', { night: true, steps: 0, nightSteps: 2 }],
+    ['night', { night: true, steps: 0, nightSteps: 3 }],
     ['end-hearth', { status: 'hearth' }],
     ['end-expired', { status: 'expired' }],
   ]
@@ -140,7 +140,7 @@ async function savedScreens(page, size) {
     await press(page, 'Continue')
     if (name === 'night') {
       await worldReady(page)
-      await expectText(page, 'Night 2 / 2', `night steps at ${size}`)
+      await expectText(page, 'Night 3', `night steps at ${size}`)
     } else if (name === 'end-hearth') {
       await expectText(page, 'The hearth takes the ember. It burns bright again.', `chapter end (hearth) at ${size}`)
     } else {
@@ -233,6 +233,17 @@ try {
   // 5. A wall.
   const wall = await tapPeaksWall(page)
   await expectText(page, "Can't cross", `chip on the peaks wall hex ${wall.row},${wall.col}`)
+  // A second blocked tap while the chip shows: a new chip (its fade starts again), not the old one kept. Both taps in
+  // one evaluate, so the first chip can't time out in between.
+  const fresh = await page.evaluate(() => {
+    const chip = () => [...document.querySelectorAll('.td-chip')].find((el) => el.textContent === "Can't cross")
+    const first = chip()
+    const c = [...window.__run.zone.cells.values()].find((c) => c.wall && c.terrain === 'peaks')
+    window.__tap(c.row, c.col)
+    return new Promise((done) => setTimeout(() => done(!!first && !first.isConnected && !!chip()), 100))
+  })
+  if (fresh) pass('a repeat blocked tap shows a fresh chip')
+  else fail('a repeat blocked tap kept the old chip, whose fade has run on')
   await shot(page, S, 'blocked', false)
 
   // 6. A night's camp.

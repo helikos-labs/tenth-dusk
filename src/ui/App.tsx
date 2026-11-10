@@ -18,7 +18,7 @@ import { useGame } from './useGame.ts'
 import './screens.css'
 
 export default function App() {
-  const { run, screen, act, blocked, preview, walking, canContinue } = useGame()
+  const { run, screen, act, blocked, blockedN, preview, walking, canContinue } = useGame()
   const zone = run?.zone
   const world = useMemo(() => (zone ? zoneToWorld(zone) : null), [zone])
   const detail = useMemo(() => detailFor(SMALL_SCREEN), [])
@@ -31,7 +31,7 @@ export default function App() {
       {screen === 'title' && <Title canContinue={canContinue} act={act} />}
       {screen === 'name' && <NameHero act={act} />}
       {screen === 'intro' && <ChapterIntro act={act} />}
-      {screen === 'world' && run && <Hud run={run} preview={preview} walking={walking} blocked={blocked} act={act} />}
+      {screen === 'world' && run && <Hud run={run} preview={preview} walking={walking} blocked={blocked} blockedN={blockedN} act={act} />}
       {screen === 'camp' && run && <CampSheet run={run} act={act} />}
       {screen === 'pack' && run && <Pack run={run} act={act} />}
       {screen === 'end' && run && <ChapterEnd run={run} act={act} />}

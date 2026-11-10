@@ -12,6 +12,7 @@ interface HudProps {
   preview: Off[] | null
   walking: boolean
   blocked: string | null
+  blockedN: number
   act: (a: GameAction) => void
 }
 
@@ -31,7 +32,7 @@ function SunArc({ run }: { run: RunState }) {
   )
 }
 
-export default function Hud({ run, preview, walking, blocked, act }: HudProps) {
+export default function Hud({ run, preview, walking, blocked, blockedN, act }: HudProps) {
   const beacons = useMemo(() => [...run.zone.cells.values()].filter((c) => c.landmark === 'beacon').length, [run.zone])
   const end = preview?.at(-1)
   const night = !end && !walking && canPressOn(run)
@@ -75,7 +76,11 @@ export default function Hud({ run, preview, walking, blocked, act }: HudProps) {
       </div>
       <div className="td-hud-foot">
         <div className="td-chip-slot" aria-live="polite">
-          {blocked && <span className="td-chip">{blocked}</span>}
+          {blocked && (
+            <span key={blockedN} className="td-chip">
+              {blocked}
+            </span>
+          )}
         </div>
         <footer className="td-bottom td-glass" data-hud="bottom">
           <div className="td-gauges">
@@ -93,7 +98,7 @@ export default function Hud({ run, preview, walking, blocked, act }: HudProps) {
             <div>
               <div className="td-gauge-head">
                 <span className="td-label">Steps</span>
-                <span className="td-gauge-value">{run.night ? `Night ${run.nightSteps} / ${NIGHT_STEPS}` : `${run.steps} / ${STEPS_PER_DAY}`}</span>
+                <span className="td-gauge-value">{run.night ? `Night ${run.nightSteps}` : `${run.steps} / ${STEPS_PER_DAY}`}</span>
               </div>
               <div className={run.night ? 'td-segs td-night' : 'td-segs'}>
                 {Array.from({ length: segs }, (_, i) => (
