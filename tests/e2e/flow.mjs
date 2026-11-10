@@ -1,16 +1,19 @@
 // Flow test (Task 13): the game's screens around the world, at phone size, in the built app. Serves dist/ with
-// `vite preview` and drives Chromium (SwiftShader WebGL) with ?test=1 (R6):
+// `vite preview` and drives Chromium (SwiftShader WebGL) with ?test=1 (R6). First, a new journey without `&seed=` gets
+// a fresh seed (6 capitals and digits). Then, for each of a fixed list of seeds (SEEDS, through `&seed=`, R19 and R21;
+// or the seeds given on the command line), in a fresh browser context:
 //   1. clear storage; Title → "Start a new journey" → name "Ash" → "Take up the lantern" → "Begin";
 //   2. the HUD shows "DAY 1 / 10" and "6 / 6";
 //   3. a hex 2 away tapped twice: the hero walks there and the steps fall;
 //   4. a reload, then "Continue": the same day and steps, and "Ash" in the Pack;
-//   5. a tap on a peaks wall hex: the chip "Can't cross";
+//   5. a tap on a peaks wall hex the Hush hasn't taken (a seen one if any): the chip "Can't cross";
 //   6. Camp, Rest and Tend, "Sleep until dawn": "DAY 2 / 10" and "6 / 6";
 //   7. at 360 × 640 the HUD's top bar, tracker and bottom bar don't overlap; at 844 × 390, "Turn your phone upright";
 //   8. corrupt text under the save key and a reload: "Start a new journey" shows and the text is set aside under
 //      `…corrupt`.
 // Fails on any console error or page error. Saves a picture of each screen at 390 × 844 and at 360 × 640 in
-// tests/e2e/out/ (flow-<size>-<screen>.png); the night HUD and both chapter ends come from the save, edited. Run after `npm run build`: node tests/e2e/flow.mjs
+// tests/e2e/out/ (flow-<size>-<screen>.png), for the first seed; the night HUD and both chapter ends come from the save,
+// edited. Run after `npm run build`: node tests/e2e/flow.mjs [SEED ...]
 // Requires Playwright with Chromium installed outside the app, as smoke.mjs does.
 import { spawn } from 'node:child_process'
 import { mkdirSync } from 'node:fs'
@@ -24,7 +27,14 @@ const { chromium } = require('playwright')
 const APP = join(dirname(fileURLToPath(import.meta.url)), '..', '..')
 const OUT = join(APP, 'tests', 'e2e', 'out')
 const PORT = 4180
-const URL = `http://localhost:${PORT}/?test=1`
+const BASE = `http://localhost:${PORT}/?test=1`
+/**
+ * Chapter 1 zones the flow runs on: each has a hex 2 away the hero can reach from the start (some seeds have none, so a
+ * random seed made the walk step flaky).
+ */
+const SEEDS = process.argv.length > 2 ? process.argv.slice(2) : ['REACH1', 'JS388J', 'ILLWZA']
+/** Pictures are saved for the first seed only. */
+let pictures = true
 const SAVE_KEY = 'tenth-dusk.save.v1'
 /** WebGL on SwiftShader is slow: the world can take a while to build and draw. */
 const READY_MS = 180_000
@@ -79,6 +89,7 @@ const press = (page, name) => page.getByRole('button', { name, exact: true }).cl
  * and `wait` ms more; `settle` false for the chip, which fades out.
  */
 const shot = async (page, size, name, settle = true, wait = 300) => {
+  if (!pictures) return
   if (settle) {
     await page
       .waitForFunction(() => document.getAnimations().every((a) => a.playState !== 'running' || a.effect.getTiming().iterations === Infinity), null, { timeout: SEEN_MS, polling: 100 })
@@ -112,12 +123,24 @@ async function tapUntilPreview(page, from) {
   }
   return null
 }
-/** Taps a peaks hex of the wall ring; returns it. */
+/**
+ * Taps a peaks hex of the wall ring that the Hush hasn't taken (at or above the run's sunkBelow; a sunk one rightly
+ * says "Lost to the Hush"), one the hero has seen or remembers if there is one, else the nearest; returns it.
+ */
 const tapPeaksWall = (page) =>
   page.evaluate(() => {
-    const c = [...window.__run.zone.cells.values()].find((c) => c.wall && c.terrain === 'peaks')
+    const run = window.__run
+    const cube = ({ row, col }) => {
+      const q = col + (row + (row & 1)) / 2
+      return [q, -row, row - q]
+    }
+    const far = (c) => Math.max(...cube(c).map((v, i) => Math.abs(v - cube(run.at)[i])))
+    const seen = (c) => (run.fog.get(`${c.row},${c.col}`) ?? 0) >= 2
+    const c = [...run.zone.cells.values()]
+      .filter((c) => c.wall && c.terrain === 'peaks' && c.row >= run.sunkBelow)
+      .sort((a, b) => Number(seen(b)) - Number(seen(a)) || far(a) - far(b))[0]
     window.__tap(c.row, c.col)
-    return { row: c.row, col: c.col }
+    return { row: c.row, col: c.col, seen: seen(c) }
   })
 
 /**
@@ -153,16 +176,37 @@ async function savedScreens(page, size) {
   await page.reload()
 }
 
-let browser
-try {
-  mkdirSync(OUT, { recursive: true })
-  await waitForServer(`http://localhost:${PORT}/`, 30_000)
-  browser = await chromium.launch({ args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist'] })
+/** A new journey without `&seed=`: its seed is fresh, 6 capitals and digits. */
+async function freshSeed(browser) {
+  const context = await newContext(browser)
+  const page = await context.newPage()
+  await page.goto(BASE)
+  await page.evaluate(() => localStorage.clear())
+  await page.reload()
+  await press(page, 'Start a new journey')
+  await press(page, 'Take up the lantern')
+  // The world (and its test hooks) mounts with the chapter intro.
+  await page.waitForFunction(() => !!window.__run, null, { timeout: SEEN_MS, polling: 100 })
+  const seed = await page.evaluate(() => window.__run.zone.seed)
+  if (/^[A-Z0-9]{6}$/.test(seed) && !SEEDS.includes(seed)) pass(`a fresh seed for the journey: ${seed}`)
+  else fail(`the journey's seed is ${JSON.stringify(seed)}, not a fresh 6 capitals and digits`)
+  await context.close()
+}
+
+/** A browser context at 390 × 844 that fails the test on any console error or page error. */
+async function newContext(browser) {
   const context = await browser.newContext({ viewport: { width: 390, height: 844 } })
   context.on('console', (m) => {
     if (m.type() === 'error') fail(`console error: ${m.text()}`)
   })
   context.on('weberror', (e) => fail(`page error: ${e.error().message}`))
+  return context
+}
+
+/** Steps 1 to 8 on `seed`'s zone, in a fresh context. */
+async function flow(browser, seed) {
+  const URL = `${BASE}&seed=${seed}`
+  const context = await newContext(browser)
   const page = await context.newPage()
   const S = '390x844'
 
@@ -187,9 +231,8 @@ try {
   await press(page, 'Begin')
   await worldReady(page)
   await page.waitForTimeout(1000)
-  const seed = await page.evaluate(() => window.__run.zone.seed)
-  if (/^[A-Z0-9]{6}$/.test(seed)) pass(`a fresh seed for the journey: ${seed}`)
-  else fail(`the journey's seed is ${JSON.stringify(seed)}, not 6 capitals and digits`)
+  const seed0 = await page.evaluate(() => window.__run.zone.seed)
+  if (seed0 !== seed) fail(`the journey's seed is ${JSON.stringify(seed0)}, not ${seed}`)
 
   // 2. The HUD.
   await expectText(page, 'DAY 1 / 10', 'HUD day')
@@ -232,16 +275,15 @@ try {
 
   // 5. A wall.
   const wall = await tapPeaksWall(page)
-  await expectText(page, "Can't cross", `chip on the peaks wall hex ${wall.row},${wall.col}`)
+  await expectText(page, "Can't cross", `chip on the peaks wall hex ${wall.row},${wall.col} (${wall.seen ? 'seen' : 'unseen'})`)
   // A second blocked tap while the chip shows: a new chip (its fade starts again), not the old one kept. Both taps in
   // one evaluate, so the first chip can't time out in between.
-  const fresh = await page.evaluate(() => {
+  const fresh = await page.evaluate((c) => {
     const chip = () => [...document.querySelectorAll('.td-chip')].find((el) => el.textContent === "Can't cross")
     const first = chip()
-    const c = [...window.__run.zone.cells.values()].find((c) => c.wall && c.terrain === 'peaks')
     window.__tap(c.row, c.col)
     return new Promise((done) => setTimeout(() => done(!!first && !first.isConnected && !!chip()), 100))
-  })
+  }, wall)
   if (fresh) pass('a repeat blocked tap shows a fresh chip')
   else fail('a repeat blocked tap kept the old chip, whose fade has run on')
   await shot(page, S, 'blocked', false)
@@ -282,8 +324,8 @@ try {
   }
   for (const [part, b] of Object.entries(boxes)) if (b && !inside(b)) fail(`the HUD's ${part} runs off a 360 × 640 screen`)
   await shot(small, T, 'world')
-  await tapPeaksWall(small)
-  await expectText(small, "Can't cross", 'chip at 360 × 640')
+  const wallSmall = await tapPeaksWall(small)
+  await expectText(small, "Can't cross", `chip at 360 × 640 on the peaks wall hex ${wallSmall.row},${wallSmall.col}`)
   await shot(small, T, 'blocked', false)
   await press(small, 'Camp')
   await small.getByRole('button', { name: /^Rest/ }).click()
@@ -316,6 +358,20 @@ try {
   const aside = await small.evaluate((k) => localStorage.getItem(`${k}.corrupt`), SAVE_KEY)
   if (aside === '{"v":1,"savedAt":') pass('the corrupt save is set aside under …corrupt')
   else fail(`…corrupt holds ${JSON.stringify(aside)}`)
+  await context.close()
+}
+
+let browser
+try {
+  mkdirSync(OUT, { recursive: true })
+  await waitForServer(`http://localhost:${PORT}/`, 30_000)
+  browser = await chromium.launch({ args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist'] })
+  await freshSeed(browser)
+  for (const seed of SEEDS) {
+    console.log(`--- seed ${seed}`)
+    await flow(browser, seed)
+    pictures = false
+  }
 } catch (e) {
   fail(String(e?.stack ?? e))
 } finally {

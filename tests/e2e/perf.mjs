@@ -5,10 +5,11 @@
 // Asserts:
 //   - no long task over 100 ms (PerformanceObserver 'longtask') after __worldReady;
 //   - __worldReady arrives under 8 s from navigation under SwiftShader (the phone target of 3 s is checked by hand);
+//   - the scene keeps drawing at rest (the overlay's fps is above 0; phones draw on demand) and the drawn hero reaches
+//     each hex the run moves to (window.__heroAt);
 //   - no shader program is compiled during the walk (renderer.info.programs before and after);
 //   - the ?perf=1 overlay shows its numbers.
-// Prints the overlay's numbers (fps, worst frame, long tasks, time to world), the frame rate sampled through the walk,
-// and each long task; saves tests/e2e/out/perf.png. Run after `npm run build`: node tests/e2e/perf.mjs
+// Prints the overlay's numbers (fps, worst frame, long tasks, time to world) and each long task; saves tests/e2e/out/perf.png. Run after `npm run build`: node tests/e2e/perf.mjs
 // Requires Playwright with Chromium installed outside the app, as smoke.mjs does.
 import { spawn } from 'node:child_process'
 import { mkdirSync } from 'node:fs'
@@ -107,6 +108,12 @@ try {
   const readyAt = readyMs
   const programsBefore = await page.evaluate(() => window.__programs())
   await page.waitForTimeout(1500)
+  // At rest the scene still draws (SwiftShader takes about a second a frame here, so a 1-second count can read 0 now
+  // and then: any reading above 0 within 10 s will do).
+  const drawing = await page
+    .waitForFunction(() => Number(document.querySelector('[data-perf]')?.dataset.fps) > 0, null, { timeout: 10_000, polling: 250 })
+    .then(() => true, () => false)
+  if (!drawing) fail('the overlay shows 0 fps at rest for 10 s: the scene stopped drawing')
   console.log(`overlay at rest: ${(await overlay(page)).text}`)
   mkdirSync(OUT, { recursive: true })
   await page.screenshot({ path: join(OUT, 'perf.png') })
@@ -115,7 +122,6 @@ try {
   // The walk: 10 moves, each to a neighbouring reachable hex (the first that leads furthest from where the hero has been);
   // the first through real pointer clicks, timed through the raycast.
   const visited = new Set()
-  const fpsSamples = []
   const tapMs = []
   let moves = 0
   let camps = 0
@@ -152,9 +158,22 @@ try {
       await page.evaluate(({ row, col }) => window.__tap(row, col), next)
     }
     await page.waitForFunction(({ row, col }) => window.__run.at.row === row && window.__run.at.col === col, next, { timeout: WAIT_MS, polling: 50 })
-    // Mid-walk, then once the hero and the camera have settled.
-    await page.waitForTimeout(250)
-    fpsSamples.push(Number((await overlay(page)).fps))
+    // The drawn hero gets there too (its spot lies within a hex's circumradius, 1, of the hex's centre): frames go on
+    // while the hero walks.
+    const arrived = await page
+      .waitForFunction(
+        ({ row, col }) => {
+          const q = col + (row + (row & 1)) / 2
+          const r = -row
+          const [x, , z] = window.__heroAt()
+          return Math.hypot(x - Math.sqrt(3) * (q + r / 2), z - 1.5 * r) < 1
+        },
+        next,
+        { timeout: WAIT_MS, polling: 50 },
+      )
+      .then(() => true, () => false)
+    if (!arrived) fail(`the drawn hero did not reach ${next.row},${next.col} (at ${await page.evaluate(() => window.__heroAt().map((v) => v.toFixed(2)).join(', '))})`)
+    // The camera settles.
     await page.waitForTimeout(900)
     moves++
   }
@@ -167,7 +186,6 @@ try {
 
   console.log(`walked ${moves} moves (${camps} camp${camps === 1 ? '' : 's'}) to ${await page.evaluate(() => `${window.__run.at.row},${window.__run.at.col}`)}`)
   console.log(`real taps: raycast and pick ${tapMs.map((m) => `${m.toFixed(1)} ms`).join(', ')}`)
-  console.log(`fps sampled mid-move: ${fpsSamples.join(', ')}`)
   console.log(`shader programs: ${programsBefore} at world ready, ${programsAfter} after the walk`)
   console.log(`long tasks (≥ 50 ms): ${longs.length} in all, ${inPlay.length} after world ready`)
   for (const l of longs) console.log(`  ${l.start >= readyAt ? 'PLAY' : 'load'} at ${l.start.toFixed(0)} ms: ${l.ms.toFixed(0)} ms`)
