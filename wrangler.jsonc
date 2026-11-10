@@ -1,0 +1,16 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "tenth-dusk",
+  "compatibility_date": "2026-11-10",
+  "assets": {
+    "directory": "./dist",
+    "not_found_handling": "single-page-application"
+  },
+  // Workers Builds Previews (non-main branches): `wrangler preview` needs this block. Previews don't
+  // inherit top-level vars or bindings: repeat the ones the app reads, and add a Durable Object binding here
+  // for each one the code reads from env.
+  "previews": {},
+  "routes": [
+    { "pattern": "tenth-dusk.helikos.dev", "custom_domain": true }
+  ]
+}

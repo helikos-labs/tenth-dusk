@@ -1,0 +1,11 @@
+{
+  "owner": "helikos-labs",
+  "visibility": "public",
+  "host": "tenth-dusk.helikos.dev",
+  "variant": "web",
+  "theme": "neutral",
+  "description": "A hex adventure for phones: carry the last ember through a fog-drowned land before the tenth dusk.",
+  "realm": "town",
+  "type": "Game · Adventure",
+  "status": "Lights on"
+}
