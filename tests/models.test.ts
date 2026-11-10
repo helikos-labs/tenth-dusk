@@ -1,9 +1,9 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import * as THREE from 'three'
-import { makeHero } from '../src/scenes/models/hero.ts'
-import { makeLandmark } from '../src/scenes/models/landmarks.ts'
-import { prepareNow } from '../src/world/models/kit.ts'
+import { dressHero, makeHero } from '../src/scenes/models/hero.ts'
+import { dimLandmark, makeLandmark } from '../src/scenes/models/landmarks.ts'
+import { copyModel, prepareNow } from '../src/world/models/kit.ts'
 
 test('every landmark kind builds, stands on y = 0 and fits in a hex', () => {
   for (const k of ['beacon', 'hearth', 'camp', 'hamlet', 'cave', 'ruins', 'start'] as const) {
@@ -39,4 +39,29 @@ test('hero is about one hex tall and bakes to ≤ 6 meshes', () => {
     if ((o as THREE.PointLight).isPointLight) light = o as THREE.PointLight
   })
   assert.ok(light, 'a lantern point light')
+})
+
+test('the dressed hero has an ember see-through twin for each part, drawn before it', () => {
+  prepareNow('test-hero-dress', makeHero)
+  const hero = dressHero(copyModel('test-hero-dress'))
+  const meshes: THREE.Mesh[] = []
+  hero.traverse((o) => {
+    if ((o as THREE.Mesh).isMesh) meshes.push(o as THREE.Mesh)
+  })
+  const twins = meshes.filter((m) => (m.material as THREE.Material).depthFunc === THREE.GreaterDepth)
+  assert.equal(twins.length * 2, meshes.length)
+  for (const t of twins) assert.ok(t.renderOrder < meshes.find((m) => m.geometry === t.geometry && m !== t)!.renderOrder)
+})
+
+test('a remembered Landmark dims and comes back as it was', () => {
+  prepareNow('test-beacon-lit', () => makeLandmark('beacon', true))
+  const b = copyModel('test-beacon-lit')
+  const before = new Map<THREE.Object3D, THREE.Material>()
+  b.traverse((o) => {
+    if ((o as THREE.Mesh).isMesh || (o as THREE.Sprite).isSprite) before.set(o, (o as THREE.Mesh).material as THREE.Material)
+  })
+  dimLandmark(b, true)
+  for (const [o, m] of before) assert.notEqual((o as THREE.Mesh).material, m)
+  dimLandmark(b, false)
+  for (const [o, m] of before) assert.equal((o as THREE.Mesh).material, m)
 })

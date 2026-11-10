@@ -15,7 +15,7 @@ A single-player 3D hex adventure for phones, played in portrait with one thumb. 
 | S1 | One chapter takes 10 to 15 minutes | Median of 5 timed playthroughs of Book I chapter 1 by Asvin |
 | S2 | Every zone is fair | The generator's checks (§14.2) pass on 1,000 seeds per Book I chapter, never needing more than 5 rerolls |
 | S3 | Smooth on a phone | At least 30 fps on a three-year-old mid-range Android and an iPhone 12. First zone in under 3 s. No main-thread task over 100 ms in play |
-| S4 | Readable on a phone | Each hex is at least 44 pt at the default zoom. Text is 12 px or larger |
+| S4 | Readable on a phone | Each hex is at least 44 pt at the default zoom, measured at the hero's row. Text is 12 px or larger |
 | S5 | Adult and sleek | Asvin signs off the look against the concept renders |
 
 ---
@@ -59,7 +59,7 @@ A single-player 3D hex adventure for phones, played in portrait with one thumb. 
 
 ### 4.1 Book I: The Saltreach (the launch book)
 
-- **Region:** a marsh coast and river valley walled in by the Teeth (peaks) to the west and north, and by the Grey Sound (sea) to the east. The sea can't be crossed in Book I.
+- **Region:** a marsh coast and river valley walled in by the Teeth (peaks) to the west and north, by the Grey Sound (sea) to the east, and by Hush-shrouded water to the south. The sea can't be crossed in Book I.
 - **Prologue:** a short tutorial zone covering moving, sight, camp, one fight and one relic.
 - **Chapter 1, The Reach Road:** the river valley. Gate: the Ford (the Ferryman).
 - **Chapter 2, Ammer Fen:** marsh and old wood. A side gate leads to the Old Wood (needs the warden's token). There is one cave.

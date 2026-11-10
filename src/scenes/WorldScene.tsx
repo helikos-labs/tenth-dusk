@@ -1,13 +1,16 @@
 // The zone's world: the world core's terrain, water, plants and roads (src/world/) under a dusk sky, the Lampwright and
 // the Landmarks in it, seen from a portrait camera that follows the hero (§4, §15.3, §15.5). Beyond the wall ring lies
 // the Hush, dark slate in fog; there is no tray. The fog of war (§15.4) dims what the hero hasn't seen, under a mist;
-// Landmarks show once seen. A tap on the ground names a hex (`onTap`); the hexes the steps left can reach glow, and a
-// path preview runs as a thin lantern-coloured tube; the hero walks each move the run makes, 0.35 s a hex.
+// Landmarks show once seen, dimmed while only remembered. Wherever the ground or a Landmark stands between the camera
+// and the hero, an ember silhouette of the hero shows through (hero.ts `dressHero`). A tap on the ground names a hex
+// (`onTap`); the hexes the steps left can reach glow, and a path preview runs as a thin lantern-coloured tube; the
+// hero walks each move the run makes, 0.35 s a hex.
 //
 // Nothing is drawn before its shaders are compiled (materials.ts warmUp): the world shows once every program it draws
-// with (ground, its shadow depth, water, plants and theirs, fog-patched roads, mist, Landmarks, the path) is compiled
-// on stand-ins, so neither the first frame nor the first tap stops to compile. The lantern is the scene's one point
-// light, there from the start, so the programs compiled ahead are the ones drawn.
+// with (ground, its shadow depth, water, plants and theirs, fog-patched roads, mist, Landmarks lit and remembered, the
+// hero's rim and silhouette, the path) is compiled on stand-ins, so neither the first frame nor the first tap stops to
+// compile. The lantern is the scene's one point light, there from the start, so the programs compiled ahead are the
+// ones drawn.
 // oxlint-disable react/immutability -- three.js objects (the camera, fog, lights, uniforms and shadow map) change in place.
 import { Canvas, useFrame, useThree } from '@react-three/fiber'
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
@@ -22,13 +25,10 @@ import { writeFog } from '../world/fog.ts'
 import { dryInside, placeInside } from '../world/layout.ts'
 import {
   DEPTH,
-  FOG_FLOOR,
-  NO_CUT,
   SLOTS,
   TEXELS,
   boardShape,
   castShadows,
-  cutHeight,
   fogPatch,
   makeStateTexture,
   makeTerrainDepthMaterial,
@@ -44,8 +44,8 @@ import { ROAD, buildRoads } from '../world/roads.ts'
 import { hexIndex, writeCells } from '../world/terrainMesh.ts'
 import { SMALL_SCREEN, useWorld, useWorldClient } from '../world/useWorld.ts'
 import type { WorldClient } from '../world/worldClient.ts'
-import { HERO_HEIGHT, makeHero } from './models/hero.ts'
-import { makeLandmark } from './models/landmarks.ts'
+import { HERO_HEIGHT, dressHero, makeHero } from './models/hero.ts'
+import { dimLandmark, makeLandmark } from './models/landmarks.ts'
 import { reachable } from './reach.ts'
 
 export interface WorldSceneProps {
@@ -68,7 +68,7 @@ export const DUSK = '#141a24'
  * a hex at the hero is `hexPx` CSS pixels wide (at least 44 pt, §1 S4), so a phone shows about 8 hexes across, and
  * never more than `across` on a wide screen; pinching zooms between `zoom[0]` and `zoom[1]` times that.
  */
-const CAMERA = { pitch: 55, fov: 35, heroAt: 0.62, halfLife: 0.25, hexPx: 50, across: 9, zoom: [0.7, 2] as const }
+const CAMERA = { pitch: 60, fov: 35, heroAt: 0.62, halfLife: 0.25, hexPx: 50, across: 9, zoom: [0.7, 2] as const }
 /** Fog from this share of the camera's distance to the hero to this share (none nearer, all beyond). */
 const FOG = { near: 1.2, far: 2.2 }
 /** The low warm sun: the direction it shines from, its colour and strength. */
@@ -78,7 +78,7 @@ const SUN_INTENSITY = 2.1
 /** Sky and ground of the hemisphere light. */
 const HEMI = { sky: 0x8ea3c2, ground: 0x2a221d, intensity: 0.75 }
 /** The models' sizes in the world (the hero is HERO_HEIGHT tall before it; a hex has circumradius 1). */
-const SCALE = { hero: 1.8, landmark: 1 }
+const SCALE = { hero: 2.4, landmark: 1 }
 /** The hero's walk: seconds per hex. */
 export const STEP_SECONDS = 0.35
 /** Where the hero stands on a Landmark's hex (offset from its centre, to its right), clear of the Landmark. */
@@ -163,7 +163,6 @@ function Scene({ world, client, run, preview, onTap }: SceneProps) {
       uWarpBox: { value: new THREE.Vector4(0, 0, 1, 1) },
       uInner: { value: new THREE.Vector4() },
       uBounds: { value: new THREE.Vector4() },
-      uCut: { value: NO_CUT.clone() },
     }),
     [],
   )
@@ -235,7 +234,7 @@ function Scene({ world, client, run, preview, onTap }: SceneProps) {
 
   // The models: every kind prepared once; the hero is one copy, each Landmark another.
   const modelKeys = useMemo(() => prepareModels(), [])
-  const hero = useMemo(() => copyModel(HERO_KEY), [])
+  const hero = useMemo(() => dressHero(copyModel(HERO_KEY)), [])
   const ground = useMemo(() => groundOf(field, world), [field, world])
   const spotOf = useMemo(() => {
     return (o: Off): THREE.Vector3 => {
@@ -256,7 +255,10 @@ function Scene({ world, client, run, preview, onTap }: SceneProps) {
     [world, ground],
   )
   // A Landmark shows once its hex has been seen (remembered or in sight); hidden in the unseen and the sunk (§15.4).
-  const shownKey = landmarks.filter((l) => (run.fog.get(l.key) ?? 0) >= 2).map((l) => l.key + (run.lit.includes(l.key) ? '*' : '')).join(' ')
+  const shownKey = landmarks
+    .filter((l) => (run.fog.get(l.key) ?? 0) >= 2)
+    .map((l) => l.key + (run.lit.includes(l.key) ? '*' : '') + (run.fog.get(l.key) === 2 ? '~' : ''))
+    .join(' ')
   useLayoutEffect(() => {
     shadows.current = true
   }, [shownKey])
@@ -288,7 +290,13 @@ function Scene({ world, client, run, preview, onTap }: SceneProps) {
         ...[...roadMaterials.values()].map((m) => noCast(standIn(m, ['normal']))),
         mist,
         tube,
-        ...modelKeys.map((k) => copyModel(k)),
+        // Every model kind as built, and dimmed as remembered (the Landmarks).
+        ...modelKeys.map((k) => (k === HERO_KEY ? dressHero(copyModel(k)) : copyModel(k))),
+        ...modelKeys.filter((k) => k !== HERO_KEY).map((k) => {
+          const c = copyModel(k)
+          dimLandmark(c, true)
+          return c
+        }),
       ]
       for (let i = 0; i < stands.length; i += COMPILE_BATCH) {
         await nextTask()
@@ -368,22 +376,17 @@ function Scene({ world, client, run, preview, onTap }: SceneProps) {
     if (!focus.current) focus.current = target
     else focus.current.lerp(target, 1 - Math.pow(2, -dt / CAMERA.halfLife))
     follow(camera, scene, focus.current, state.size, zoom.current)
-    // The ground's cutaway (materials.ts CUT): under the view of the hero's feet, below the focus.
-    const c = uniforms.uCut.value
-    c.set(focus.current.x, focus.current.y - (HERO_HEIGHT * SCALE.hero) / 2, focus.current.z, slopeOf(camera))
     // The first frame with the world in it, then the next: the world has been drawn (R4).
     if (shown && drawn.current < 2 && ++drawn.current === 2 && TEST) hooks.__worldReady = true
   })
 
-  // Taps and pinches on the canvas. A tap casts a ray to the ground as it is drawn (the unseen sunk to the fog floor,
-  // water at its surface, the cutaway cut: `shownHeight`), finds the province under the point through the warp
+  // Taps and pinches on the canvas. A tap raycasts to the ground, finds the province under the point through the warp
   // (`hexAt(warp(point))`) and reports its hex; two fingers pinch the zoom (the wheel too, on a desktop).
+  const terrainMesh = useRef<THREE.Mesh>(null)
   const tapRef = useRef(onTap)
-  const fogRef = useRef(run.fog)
   useLayoutEffect(() => {
     tapRef.current = onTap
-    fogRef.current = run.fog
-  }, [onTap, run.fog])
+  }, [onTap])
   useEffect(() => {
     const el = gl.domElement
     const down = new Map<number, { x: number; y: number; x0: number; y0: number; t0: number }>()
@@ -395,17 +398,14 @@ function Scene({ world, client, run, preview, onTap }: SceneProps) {
     }
     const clampZoom = (z: number) => Math.min(CAMERA.zoom[1], Math.max(CAMERA.zoom[0], z))
     const ray = new THREE.Raycaster()
-    const shownHeight = (x: number, z: number) => {
-      const cell = field.provinceAt(x, z)
-      const hidden = !!cell && !cell.wall && (fogRef.current.get(offKey(cell)) ?? 0) <= 1
-      return cutHeight(hidden ? FOG_FLOOR : Math.max(field.height(x, z), WATER_LEVEL), z, uniforms.uCut.value)
-    }
     const tap = (x: number, y: number) => {
+      const mesh = terrainMesh.current
+      if (!mesh) return
       const r = el.getBoundingClientRect()
       ray.setFromCamera(new THREE.Vector2(((x - r.left) / r.width) * 2 - 1, -((y - r.top) / r.height) * 2 + 1), camera)
-      const hit = march(ray.ray, shownHeight)
+      const hit = ray.intersectObject(mesh, false)[0]
       if (!hit) return
-      const w = field.warp(hit.x, hit.z)
+      const w = field.warp(hit.point.x, hit.point.z)
       tapRef.current(toOffset(hexAt(w.x, w.z)))
     }
     const onDown = (e: PointerEvent) => {
@@ -446,7 +446,7 @@ function Scene({ world, client, run, preview, onTap }: SceneProps) {
       el.removeEventListener('pointercancel', onUp)
       el.removeEventListener('wheel', onWheel)
     }
-  }, [gl, camera, field, uniforms])
+  }, [gl, camera, field])
 
   // Test hooks (?test=1, R6): tap a hex, read the run, the preview and the hero's place, and project a point at the
   // height of a hex's centre (offset dx, dz from it) to the screen (CSS px) to measure hexes there.
@@ -475,6 +475,7 @@ function Scene({ world, client, run, preview, onTap }: SceneProps) {
       <group visible={shown}>
         {terrain && (
           <mesh
+            ref={terrainMesh}
             geometry={terrain.surface}
             material={materials.terrain}
             customDepthMaterial={materials.terrainDepth}
@@ -487,7 +488,7 @@ function Scene({ world, client, run, preview, onTap }: SceneProps) {
         <primitive object={plants.group} dispose={null} />
         <primitive object={roads} dispose={null} />
         {landmarks.map((l) => (
-          <Landmark key={l.key} kind={l.kind} lit={run.lit.includes(l.key)} at={l.at} shown={(run.fog.get(l.key) ?? 0) >= 2} />
+          <Landmark key={l.key} kind={l.kind} lit={run.lit.includes(l.key)} at={l.at} fog={run.fog.get(l.key) ?? 0} />
         ))}
         {tube && <mesh geometry={tube} material={materials.tube} />}
         {terrain && <primitive object={mist} dispose={null} />}
@@ -497,9 +498,14 @@ function Scene({ world, client, run, preview, onTap }: SceneProps) {
   )
 }
 
-/** A Landmark: a copy of its kind, ticking (a fire's flicker) while it shows. */
-function Landmark({ kind, lit, at, shown }: { kind: LandmarkKind; lit: boolean; at: THREE.Vector3; shown: boolean }) {
+/**
+ * A Landmark: a copy of its kind, shown once its hex has been seen (§15.4), dimmed while only remembered (§5.2), and
+ * ticking (a fire's flicker) while it shows.
+ */
+function Landmark({ kind, lit, at, fog }: { kind: LandmarkKind; lit: boolean; at: THREE.Vector3; fog: number }) {
   const model = useMemo(() => copyModel(landmarkKey(kind, kind === 'beacon' && lit)), [kind, lit])
+  const shown = fog >= 2
+  useLayoutEffect(() => dimLandmark(model, fog === 2), [model, fog])
   useFrame((state, dt) => {
     if (!shown) return
     for (const tick of ticksOf(model)) tick(state.clock.elapsedTime, dt)
@@ -550,12 +556,6 @@ function follow(camera: THREE.PerspectiveCamera, scene: THREE.Scene, focus: THRE
     fog.near = dist * FOG.near
     fog.far = dist * FOG.far
   }
-}
-
-/** The slope (rise over run toward the camera) of the follow camera's view down to its focus. */
-function slopeOf(camera: THREE.PerspectiveCamera) {
-  const below = Math.atan((2 * CAMERA.heroAt - 1) * Math.tan(THREE.MathUtils.degToRad(camera.fov / 2)))
-  return Math.tan(THREE.MathUtils.degToRad(CAMERA.pitch) + below)
 }
 
 /** The sky and the fog, in the Hush's colour (`follow` sets the fog's range). */
@@ -609,39 +609,6 @@ function ShadowRefresh({ need }: { need: { current: boolean } }) {
     gl.shadowMap.needsUpdate = true
   })
   return null
-}
-
-/** The ground stands no higher than this (the wall ring's peaks reach about 5.2). */
-const GROUND_TOP = 6
-/** The ray march's step and its refinement by halving. */
-const MARCH = { step: 0.06, halvings: 10, depth: -1 }
-
-/**
- * Where `ray` first meets ground of height `height(x, z)`: marched in short steps down from GROUND_TOP, then refined
- * by halving. Null if it never does (it looks up, or past the ground).
- */
-function march(ray: THREE.Ray, height: (x: number, z: number) => number): THREE.Vector3 | null {
-  const { origin: o, direction: d } = ray
-  if (d.y >= 0) return null
-  const p = new THREE.Vector3()
-  let t = Math.max(0, (GROUND_TOP - o.y) / d.y)
-  let last = t
-  for (;;) {
-    ray.at(t, p)
-    if (p.y < MARCH.depth) return null
-    if (p.y <= height(p.x, p.z)) break
-    last = t
-    t += MARCH.step
-  }
-  let lo = last
-  let hi = t
-  for (let i = 0; i < MARCH.halvings; i++) {
-    const mid = (lo + hi) / 2
-    ray.at(mid, p)
-    if (p.y <= height(p.x, p.z)) hi = mid
-    else lo = mid
-  }
-  return ray.at(hi, p)
 }
 
 /** Waits for the next task, so long work split into steps leaves frames room in between. */

@@ -7,7 +7,7 @@ export const CHAPTER1: ChapterSkeleton = {
   rows: 17,
   cols: 9,
   wallDepth: 4,
-  walls: { west: 'peaks', east: 'sea', north: 'peaks', south: 'peaks' },
+  walls: { west: 'peaks', east: 'sea', north: 'peaks', south: 'sea' },
   weights: { meadow: 0.36, heath: 0.12, forest: 0.22, hills: 0.12, marsh: 0.1, mountain: 0.05, lake: 0.03 },
   riverRows: [7, 9],
   start: { row: 0, col: 4 },

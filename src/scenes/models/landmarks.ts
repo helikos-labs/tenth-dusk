@@ -5,6 +5,7 @@
 // banked embers). Each stands on y = 0 at its hex centre and fits inside the hex; static parts bake (kit `prepare`).
 import * as THREE from 'three'
 import type { LandmarkKind } from '../../rules/zone.ts'
+import { FOG_LOOK } from '../../world/materials.ts'
 import { box, cone, cyl, gable, geo, mat, part, rough, torus } from '../../world/models/kit.ts'
 import { EMBER, flame, rod } from './parts.ts'
 
@@ -147,4 +148,53 @@ export function makeLandmark(kind: LandmarkKind, lit = false): THREE.Group {
     : new THREE.Group()
   g.name = `landmark-${kind}${lit ? '-lit' : ''}`
   return g
+}
+
+const dimmed = new Map<THREE.Material, THREE.Material>()
+const DUSK = FOG_LOOK.DUSK
+
+/**
+ * The remembered look of a material (§5.2: remembered landmarks show dimmed), made once per material: as the ground's
+ * remembered treatment (30% saturation, then 35% toward the Hush's colour) applied to the lit colour; a fire's ember
+ * material burns on at half strength (the same program), and a halo at half its opacity.
+ */
+function dimOf(m: THREE.Material): THREE.Material {
+  let d = dimmed.get(m)
+  if (d) return d
+  const s = m as THREE.MeshStandardMaterial
+  if ((m as THREE.SpriteMaterial).isSpriteMaterial) {
+    d = m.clone()
+    d.opacity *= 0.5
+  } else if (s.isMeshStandardMaterial && !s.vertexColors && s.emissiveIntensity > 1) {
+    const f = s.clone()
+    f.emissiveIntensity *= 0.5
+    f.color.multiplyScalar(0.6)
+    d = f
+  } else if (s.isMeshStandardMaterial) {
+    const r = s.clone()
+    r.onBeforeCompile = (shader, renderer) => {
+      s.onBeforeCompile(shader, renderer)
+      shader.fragmentShader = shader.fragmentShader.replace(
+        '#include <opaque_fragment>',
+        `#include <opaque_fragment>
+// Remembered: dimmed as the remembered ground is.
+float td_l = dot(gl_FragColor.rgb, vec3(0.2126, 0.7152, 0.0722));
+gl_FragColor.rgb = mix(mix(vec3(td_l), gl_FragColor.rgb, 0.3), vec3(${DUSK.r.toFixed(4)}, ${DUSK.g.toFixed(4)}, ${DUSK.b.toFixed(4)}), 0.35);`,
+      )
+    }
+    r.customProgramCacheKey = () => `${s.customProgramCacheKey()}|td-remembered`
+    d = r
+  } else d = m
+  dimmed.set(m, d)
+  return d
+}
+
+/** Shows a Landmark's copy (kit `copyModel`) remembered (dimmed, `dimOf`) or in sight (as built). */
+export function dimLandmark(copy: THREE.Object3D, dim: boolean) {
+  copy.traverse((o) => {
+    const m = o as THREE.Mesh | THREE.Sprite
+    if (!(m as THREE.Mesh).isMesh && !(m as THREE.Sprite).isSprite) return
+    const lit = (o.userData.tdLit ??= m.material) as THREE.Material
+    m.material = dim ? dimOf(lit) : lit
+  })
 }

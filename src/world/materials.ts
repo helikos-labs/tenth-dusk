@@ -499,33 +499,11 @@ export interface TerrainUniforms {
   uSun: { value: THREE.Vector3 }
   /** The zone's bounds without its wall ring (field.ts `bounds.inner`: min x, min z, max x, max z), for the walls' fog. */
   uInner: { value: THREE.Vector4 }
-  /** The camera cutaway (`cutHeight`): the hero's feet (x, y, z) and the slope of the camera's view down to them (w). */
-  uCut: { value: THREE.Vector4 }
 }
 
 /** What the fog of war reads (`windPatch` for plants, mist.ts): the state texture, the province lookup and uInner. */
 export type FogUniforms = Pick<TerrainUniforms, 'uTime' | 'uState' | 'uStateSize' | 'uRect' | 'uRim' | 'uWarp' | 'uWarpBox' | 'uInner'>
 
-
-/**
- * The camera cutaway: ground between the follow camera and the hero that would rise into the view of the hero's feet
- * is cut down to a plane CUT.drop under that view, sloping up toward the camera as the view does (uCut: the hero's
- * feet, and the view's slope). The walls behind a hero standing by the zone's near edge (peaks over 4 high, a hex
- * away) would hide them otherwise. The cut fades in over CUT.fade toward the camera, and never touches ground beyond
- * the hero.
- */
-export const CUT = { drop: 0.15, fade: 0.5 }
-/** No cutaway: a focus so high that nothing is cut. */
-export const NO_CUT = new THREE.Vector4(0, 1e4, 0, 0)
-
-/** How high the ground stands at world point (x, z) once cut away (`CUT`) as `cut` (uCut) says, given its height. */
-export function cutHeight(height: number, z: number, cut: THREE.Vector4): number {
-  const ahead = z - cut.z
-  const lim = cut.y - CUT.drop + ahead * cut.w
-  const t = Math.min(1, Math.max(0, ahead / CUT.fade))
-  const k = t * t * (3 - 2 * t)
-  return height + (Math.min(height, lim) - height) * k
-}
 
 /** The reachable highlight (texel 2 b): its colour, rim width (world units) and glow, and the wash inside it. */
 export const REACH_LOOK = { color: new THREE.Color('#ffb46a'), rim: 0.09, rimGlow: 0.55, wash: 0.035 }
@@ -547,7 +525,6 @@ varying vec3 vWPos;
 varying float vRock;
 varying float vCoast;
 varying float vSink;
-uniform vec4 uCut;
 ${SINK_VERTEX_GLSL}`,
       )
       .replace(
@@ -555,23 +532,15 @@ ${SINK_VERTEX_GLSL}`,
         `#include <beginnormal_vertex>
 // Fog of war (R16): unseen and sunk land sinks to the flat fog floor, so no relief shows through; its normal turns up.
 float td_sink = td_sinkAt(position, aCoast);
-objectNormal = normalize(mix(objectNormal, vec3(0.0, 1.0, 0.0), td_sink));
-// The camera cutaway (CUT): ground rising into the camera's view of the hero is cut down to a plane under it; the cut
-// face's normal turns up.
-vec3 td_w = (modelMatrix * vec4(position, 1.0)).xyz;
-float td_ahead = td_w.z - uCut.z;
-float td_lim = uCut.y - ${CUT.drop.toFixed(3)} + td_ahead * uCut.w;
-float td_cutK = smoothstep(0.0, ${CUT.fade.toFixed(3)}, td_ahead);
-objectNormal = normalize(mix(objectNormal, vec3(0.0, 1.0, 0.0), td_cutK * smoothstep(td_lim - 0.05, td_lim + 0.05, td_w.y)));`,
+objectNormal = normalize(mix(objectNormal, vec3(0.0, 1.0, 0.0), td_sink));`,
       )
       .replace(
         '#include <begin_vertex>',
         `#include <begin_vertex>
 transformed.y = mix(transformed.y, ${FOG_FLOOR.toFixed(3)}, td_sink);
-transformed.y = mix(transformed.y, min(transformed.y, td_lim), td_cutK);
-vSink = max(td_sink, td_cutK * smoothstep(td_lim - 0.05, td_lim + 0.05, td_w.y));
+vSink = td_sink;
 vWPos = (modelMatrix * vec4(transformed, 1.0)).xyz;
-vRock = aRock * (1.0 - vSink);
+vRock = aRock * (1.0 - td_sink);
 vCoast = aCoast;`,
       )
     shader.fragmentShader = shader.fragmentShader
@@ -823,12 +792,10 @@ void main() {
  * board. `sway` scales it (trees 0.07, grass and flowers more; 0 for none). Given the fog's uniforms too, a plant reads
  * texel 2 of the province at its instance's origin (through the warp, as the ground does): unseen or sunk (its ground
  * sunk to the fog floor), it scales to nothing; otherwise it takes the ground's treatment of its state (remembered and
- * wall desaturated). Its shadow needs `plantDepthMaterials`. Given the camera cutaway's uniform (uCut) too, a plant
- * standing on ground the cutaway lowers (CUT) scales to nothing, so none floats over the cut.
+ * wall desaturated). Its shadow needs `plantDepthMaterials`.
  */
 export function windPatch(mat: THREE.Material, uniforms: { uTime: { value: number } } & Partial<FogUniforms>, sway: number, key: string) {
   const fog = !!uniforms.uState
-  const cut = fog && !!(uniforms as { uCut?: unknown }).uCut
   mat.onBeforeCompile = (shader) => {
     Object.assign(shader.uniforms, fog ? uniforms : { uTime: uniforms.uTime })
     shader.fragmentShader = shader.fragmentShader
@@ -845,9 +812,7 @@ export function windPatch(mat: THREE.Material, uniforms: { uTime: { value: numbe
     shader.vertexShader = shader.vertexShader
       .replace(
         '#include <common>',
-        `#include <common>\nuniform float uTime;\nvarying vec3 rr_wpos;` +
-          (fog ? `${FOG_UNIFORMS_GLSL}\nvarying vec4 rr_fog;\n${WARP_GLSL}\n${FOG_TEXEL_GLSL}` : '') +
-          (cut ? '\nuniform vec4 uCut;' : ''),
+        `#include <common>\nuniform float uTime;\nvarying vec3 rr_wpos;` + (fog ? `${FOG_UNIFORMS_GLSL}\nvarying vec4 rr_fog;\n${WARP_GLSL}\n${FOG_TEXEL_GLSL}` : ''),
       )
       .replace(
         '#include <begin_vertex>',
@@ -869,13 +834,6 @@ export function windPatch(mat: THREE.Material, uniforms: { uTime: { value: numbe
   // Fog of war: the province at the instance's origin; an unseen or sunk plant (not on a wall) scales to nothing.
   rr_fog = td_fogOf(rr_hexOf((modelMatrix * vec4(rr_base, 1.0)).xz));
   if (rr_fog.a < 0.5 && rr_fog.r < 0.5) transformed *= 0.0;`
-            : '') +
-          (cut
-            ? `
-  // The camera cutaway: a plant on ground the cut lowers goes.
-  vec3 rr_o = (modelMatrix * vec4(rr_base, 1.0)).xyz;
-  float rr_ahead = rr_o.z - uCut.z;
-  if (rr_ahead > 0.0 && rr_o.y > uCut.y - ${CUT.drop.toFixed(3)} + rr_ahead * uCut.w - 0.02) transformed *= 0.0;`
             : ''),
       )
       .replace(
@@ -888,7 +846,7 @@ export function windPatch(mat: THREE.Material, uniforms: { uTime: { value: numbe
 #endif`,
       )
   }
-  mat.customProgramCacheKey = () => `rr-wind2-${key}${fog ? '-fog2' : ''}${cut ? '-cut' : ''}`
+  mat.customProgramCacheKey = () => `rr-wind2-${key}${fog ? '-fog2' : ''}`
 }
 
 /**
