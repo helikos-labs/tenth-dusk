@@ -7,7 +7,7 @@ import * as THREE from 'three'
 import type { Terrain, WorldCell } from './adapter.ts'
 import { LAND, PEAK_SCALE, SQRT3, WATER_LEVEL, fbm, fray, ridged, smoothstep, type Bounds, type Field, type Probe, type Rect } from './field.ts'
 import { flowersOf } from './flora.ts'
-import { slotOf } from './materials.ts'
+import { TEXELS, slotOf } from './materials.ts'
 import { PALETTE as PAL } from './palette.ts'
 
 /**
@@ -23,6 +23,20 @@ export const TERRAIN_ID: Record<Terrain, number> = { grassland: 0, forest: 1, mo
 /** Each hex's slot in the shaders' state texture (a fixed grid of axial coordinates, see materials.ts). */
 export function hexIndex(board: Record<string, WorldCell>): Map<string, number> {
   return new Map(Object.values(board).map((c) => [`${c.q},${c.r}`, slotOf(c.q, c.r)]))
+}
+
+/**
+ * Writes texel 1 of each hex's slot (materials.ts makeStateTexture): its Landmark and its terrain, so a pixel knows a
+ * lake from land (0: the sea, no hex), and marks the texture for upload. Texels 0 and 2 are left as they are.
+ */
+export function writeCells(tex: THREE.DataTexture, slots: Map<string, number>, board: Record<string, WorldCell>): void {
+  const data = tex.image.data as Uint8Array
+  for (const [k, slot] of slots) {
+    const c = board[k]
+    if (!c) continue
+    data.set([0, c.landmark ? 255 : 0, 0, Math.round(((TERRAIN_ID[c.terrain] + 1) / 8) * 255)], (slot * TEXELS + 1) * 4)
+  }
+  tex.needsUpdate = true
 }
 
 const tmp = new THREE.Color()

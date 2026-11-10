@@ -10,22 +10,47 @@
 // so provinces can be counted while the island still reads as one landscape.
 import * as THREE from 'three'
 import type { WorldCell } from './adapter.ts'
+import { CHAPTER1 } from '../data/book1.ts'
+import { toAxial } from '../rules/hex.ts'
 import { makeWarp, rimRay, type Bounds, type Rect } from './field.ts'
 import { PALETTE } from './palette.ts'
 
 /** Texels per hex in the state texture. */
-export const TEXELS = 2
-
-/** The state texture holds a fixed grid of axial coordinates, |q|, |r| <= SLOT_OFFSET, so a shader can find any hex. */
-const SLOT_OFFSET = 7
-const SLOT_WIDTH = 2 * SLOT_OFFSET + 1
-export const SLOTS = SLOT_WIDTH * SLOT_WIDTH
-export const slotOf = (q: number, r: number) => (r + SLOT_OFFSET) * SLOT_WIDTH + (q + SLOT_OFFSET)
+export const TEXELS = 3
 
 /**
- * Per-hex state, two RGBA texels per hex slot:
+ * The state texture holds a fixed grid of axial coordinates round SLOT_CENTRE, |q - centre q| and |r - centre r| at
+ * most SLOT_OFFSET, so a shader can find any hex. It is sized from the bounds of Book I chapter 1 with its wall ring
+ * (rows and columns -wallDepth to rows or cols - 1 + wallDepth): 29 × 29 slots, 2,523 texels wide.
+ */
+function slotGrid(s: { rows: number; cols: number; wallDepth: number }) {
+  let q0 = Infinity
+  let q1 = -Infinity
+  let r0 = Infinity
+  let r1 = -Infinity
+  for (let row = -s.wallDepth; row < s.rows + s.wallDepth; row++)
+    for (const col of [-s.wallDepth, s.cols - 1 + s.wallDepth]) {
+      const { q, r } = toAxial({ row, col })
+      q0 = Math.min(q0, q)
+      q1 = Math.max(q1, q)
+      r0 = Math.min(r0, r)
+      r1 = Math.max(r1, r)
+    }
+  const centre = { q: Math.round((q0 + q1) / 2), r: Math.round((r0 + r1) / 2) }
+  return { centre, offset: Math.max(q1 - centre.q, centre.q - q0, r1 - centre.r, centre.r - r0) }
+}
+const GRID = slotGrid(CHAPTER1)
+export const SLOT_CENTRE: { q: number; r: number } = GRID.centre
+export const SLOT_OFFSET = GRID.offset
+const SLOT_WIDTH = 2 * SLOT_OFFSET + 1
+export const SLOTS = SLOT_WIDTH * SLOT_WIDTH
+export const slotOf = (q: number, r: number) => (r - SLOT_CENTRE.r + SLOT_OFFSET) * SLOT_WIDTH + (q - SLOT_CENTRE.q + SLOT_OFFSET)
+
+/**
+ * Per-hex state, three RGBA texels per hex slot:
  *   texel 0: r = target hint, g = hover (0.5 illegal, 1 legal), b and a unused (0)
  *   texel 1: r unused (0), g = landmark, b = selected, a = (terrain id + 1) / 8 (0: no hex, the sea)
+ *   texel 2: fog (fog.ts `fogByte`): r = fog state / 3, g = marker kind, b = sight-ring highlight, a = wall
  */
 export function makeStateTexture(count: number): THREE.DataTexture {
   const data = new Uint8Array(Math.max(1, count) * TEXELS * 4)
@@ -207,7 +232,7 @@ export function noWarpTexture(): THREE.DataTexture {
  * rim provinces run on out along the rays through the outline's inner corners; the sea belongs to none (slot -1).
  * `uRect` and `uRim` are the board's shape (`boardShape`).
  */
-const WARP_GLSL = /* glsl */ `
+export const WARP_GLSL = /* glsl */ `
 // The warp's displacement at a world point (the point's province is the hex under p + rr_disp(p)).
 vec2 rr_disp(vec2 p) {
   return texture2D(uWarp, (p - uWarpBox.xy) / uWarpBox.zw).rg;
@@ -233,7 +258,8 @@ bool rr_on(vec2 h) {
   return row > uRect.x - 0.5 && row < uRect.y + 0.5 && col > uRect.z - 0.5 && col < uRect.w + 0.5;
 }
 float rr_slotOf(vec2 h) {
-  return (abs(h.x) > ${SLOT_OFFSET}.0 || abs(h.y) > ${SLOT_OFFSET}.0) ? -1.0 : (h.y + ${SLOT_OFFSET}.0) * ${SLOT_WIDTH}.0 + (h.x + ${SLOT_OFFSET}.0);
+  vec2 g = h - vec2(${SLOT_CENTRE.q}.0, ${SLOT_CENTRE.r}.0);
+  return (abs(g.x) > ${SLOT_OFFSET}.0 || abs(g.y) > ${SLOT_OFFSET}.0) ? -1.0 : (g.y + ${SLOT_OFFSET}.0) * ${SLOT_WIDTH}.0 + (g.x + ${SLOT_OFFSET}.0);
 }
 // A Water province: terrain id 3, stored as 4 / 8 in texel 1's alpha (makeStateTexture).
 bool rr_lake(vec2 h) {
@@ -241,31 +267,46 @@ bool rr_lake(vec2 h) {
   if (slot < 0.0) return false;
   return abs(texture2D(uState, vec2((slot * ${TEXELS}.0 + 1.5) / uStateSize, 0.5)).a - 0.5) < 0.06;
 }
-struct RRProv { float slot; vec2 local; float lake; float d; float ink; float edge; };
+// Off the board: the rim province whose outer edge the ray from the centre through warped point w leaves through
+// (field.ts toRim).
+vec2 rr_rimHex(vec2 w) {
+  vec2 rd = w - uRim.xy;
+  float lo = min(1.0, min(uRim.z / max(abs(rd.x), 1e-6), uRim.w / max(abs(rd.y), 1e-6)));
+  float hi = 1.0;
+  for (int i = 0; i < 10; i++) {
+    float mid = 0.5 * (lo + hi);
+    if (rr_on(rr_hexRound(uRim.xy + rd * mid))) lo = mid;
+    else hi = mid;
+  }
+  return rr_hexRound(uRim.xy + rd * lo);
+}
+// The hex of the province a land point lies in, by its warped point only (no distances): for plants' origins.
+vec2 rr_hexOf(vec2 world) {
+  vec2 w = world + rr_disp(world);
+  vec2 h = rr_hexRound(w);
+  return rr_on(h) ? h : rr_rimHex(w);
+}
+// The six neighbours' directions (axial), edge i facing RR_DIRS[i].
+const vec2 RR_DIRS[6] = vec2[6](vec2(1.0, -1.0), vec2(1.0, 0.0), vec2(0.0, 1.0), vec2(-1.0, 1.0), vec2(-1.0, 0.0), vec2(0.0, -1.0));
+// hex: the province's axial coordinates; dn[i]: the distance to the border with neighbour RR_DIRS[i] (9 where there is
+// none: the board's outline, or off the board).
+struct RRProv { float slot; vec2 local; float lake; float d; float ink; float edge; vec2 hex; float dn[6]; };
 RRProv rr_province(vec2 world, bool land) {
-  RRProv P = RRProv(-1.0, vec2(0.0), 0.0, 9.0, 9.0, 9.0);
+  RRProv P = RRProv(-1.0, vec2(0.0), 0.0, 9.0, 9.0, 9.0, vec2(0.0), float[6](9.0, 9.0, 9.0, 9.0, 9.0, 9.0));
   vec2 dsp = rr_disp(world);
   vec2 w = world + dsp;
   vec2 h = rr_hexRound(w);
   bool off = !rr_on(h);
   if (off) {
     if (!land) return P;
-    // The rim province whose outer edge the ray from the centre leaves through (field.ts toRim).
-    vec2 rd = w - uRim.xy;
-    float lo = min(1.0, min(uRim.z / max(abs(rd.x), 1e-6), uRim.w / max(abs(rd.y), 1e-6)));
-    float hi = 1.0;
-    for (int i = 0; i < 10; i++) {
-      float mid = 0.5 * (lo + hi);
-      if (rr_on(rr_hexRound(uRim.xy + rd * mid))) lo = mid;
-      else hi = mid;
-    }
-    h = rr_hexRound(uRim.xy + rd * lo);
+    h = rr_rimHex(w);
   }
   // How the warp stretches a distance across a line with normal n (warped space): |J^T n|.
   vec2 jx = vec2(1.0, 0.0) + (rr_disp(world + vec2(0.04, 0.0)) - dsp) * 25.0;
   vec2 jz = vec2(0.0, 1.0) + (rr_disp(world + vec2(0.0, 0.04)) - dsp) * 25.0;
   vec2 ctr = vec2(1.7320508 * (h.x + h.y * 0.5), 1.5 * h.y);
   P.slot = rr_slotOf(h);
+  P.hex = h;
   P.local = w - ctr;
   P.lake = rr_lake(h) ? 1.0 : 0.0;
   // Edge i faces neighbour EDGE_DIR[i]; its outward normal points at 60 * i - 60 degrees; corner i starts it.
@@ -283,6 +324,7 @@ RRProv rr_province(vec2 world, bool land) {
     }
     if (off) continue;
     P.d = min(P.d, dw);
+    P.dn[i] = dw;
     // A border with a lake is a shore, not an ink line; it counts as 0.3 away, so the distance stays continuous.
     P.ink = min(P.ink, dw < 0.3 && (P.lake > 0.5 || rr_lake(h + dirs[i])) ? 0.3 : dw);
   }
@@ -298,10 +340,104 @@ RRProv rr_province(vec2 world, bool land) {
       float dr = dot(w - uRim.xy, dir) > length(v - uRim.xy) ? abs(dot(w - uRim.xy, perp)) : length(w - v);
       float dw = dr / max(length(vec2(dot(perp, jx), dot(perp, jz))), 0.25);
       P.d = min(P.d, dw);
+      int across = a ? (i + 5) % 6 : i;
+      P.dn[across] = min(P.dn[across], dw);
       P.ink = min(P.ink, dw < 0.3 && (P.lake > 0.5 || rr_lake(h + (a ? dirs[(i + 5) % 6] : dirs[i]))) ? 0.3 : dw);
     }
   }
   return P;
+}
+`
+
+/** A colour as a GLSL vec3 (its linear working-space values, as the shaders work in). */
+const glsl = (c: THREE.Color) => `vec3(${c.r.toFixed(4)}, ${c.g.toFixed(4)}, ${c.b.toFixed(4)})`
+
+/**
+ * Fog of war (§15.4), read from texel 2 (fog.ts). Each state treats a colour:
+ *   unseen: mixed 92% toward UNSEEN, with slow mist noise (MIST_NOISE toward MIST);
+ *   sunk: mixed 85% toward DUSK, the Hush;
+ *   remembered: 30% saturation, then 35% toward DUSK;
+ *   in sight: unchanged;
+ *   wall: remembered, then toward UNSEEN in step with how far it lies into the ring (from the zone's bounds, `uInner`),
+ *   reaching WALL_DARK WALL_FADE world units out (the ring is 4 hexes deep: 6 across its rows).
+ */
+export const FOG_LOOK = {
+  UNSEEN: new THREE.Color('#10151d'),
+  DUSK: new THREE.Color('#141a24'),
+  MIST: new THREE.Color('#2b3542'),
+  MIST_NOISE: 0.45,
+  WALL_DARK: 0.8,
+  WALL_FADE: 6,
+}
+/** States blend over this width across a province border (world units: a hex is 2 across its corners). */
+export const FOG_BLEND = 0.12
+
+/** The fog treatments, given a state's weights. Needs uInner and the noise (NOISE_GLSL). */
+export const FOG_TINT_GLSL = /* glsl */ `
+// How much of each state a point shows: x unseen, y sunk, z remembered, w in sight, and wall; they sum to 1.
+struct TDFog { vec4 w; float wall; };
+// Adds weight k of a hex whose texel 2 is s (a wall counts as a wall whatever its state).
+void td_add(inout TDFog f, vec4 s, float k) {
+  if (s.a > 0.5) { f.wall += k; return; }
+  float st = floor(s.r * 3.0 + 0.5);
+  f.w += k * vec4(st < 0.5 ? 1.0 : 0.0, abs(st - 1.0) < 0.5 ? 1.0 : 0.0, abs(st - 2.0) < 0.5 ? 1.0 : 0.0, st > 2.5 ? 1.0 : 0.0);
+}
+// One hex's state alone.
+TDFog td_one(vec4 s) {
+  TDFog f = TDFog(vec4(0.0), 0.0);
+  td_add(f, s, 1.0);
+  return f;
+}
+vec3 td_remembered(vec3 c) {
+  float l = dot(c, vec3(0.2126, 0.7152, 0.0722));
+  return mix(mix(vec3(l), c, 0.3), ${glsl(FOG_LOOK.DUSK)}, 0.35);
+}
+// How far point p lies outside the zone's bounds.
+float td_ring(vec2 p) {
+  return length(max(max(uInner.xy - p, p - uInner.zw), 0.0));
+}
+// Colour c at world point p as fog f shows it; mist (0 to 1) is the unseen's slow noise.
+vec3 td_tint(vec3 c, TDFog f, vec2 p, float mist) {
+  float sum = max(dot(f.w, vec4(1.0)) + f.wall, 1e-4);
+  vec3 unseen = mix(mix(c, ${glsl(FOG_LOOK.UNSEEN)}, 0.92), ${glsl(FOG_LOOK.MIST)}, ${FOG_LOOK.MIST_NOISE.toFixed(3)} * mist);
+  vec3 sunk = mix(c, ${glsl(FOG_LOOK.DUSK)}, 0.85);
+  vec3 rem = td_remembered(c);
+  vec3 wall = mix(rem, ${glsl(FOG_LOOK.UNSEEN)}, ${FOG_LOOK.WALL_DARK.toFixed(3)} * min(td_ring(p) / ${FOG_LOOK.WALL_FADE.toFixed(1)}, 1.0));
+  return (unseen * f.w.x + sunk * f.w.y + rem * f.w.z + c * f.w.w + wall * f.wall) / sum;
+}
+// The unseen's slow mist noise at p (0 to 1).
+float td_mistNoise(vec2 p, float t) {
+  return smoothstep(-0.6, 0.8, rr_snoise(p * 0.35 + vec2(t * 0.025, t * 0.011)) * 0.65 + rr_snoise(p * 0.9 - vec2(t * 0.017, -t * 0.03)) * 0.35);
+}
+`
+
+/** One hex's fog texel. Needs WARP_GLSL and uState / uStateSize. */
+const FOG_TEXEL_GLSL = /* glsl */ `
+// Texel 2 of hex h; a hex outside the slot grid is wall.
+vec4 td_fogOf(vec2 h) {
+  float slot = rr_slotOf(h);
+  if (slot < 0.0) return vec4(0.0, 0.0, 0.0, 1.0);
+  return texture2D(uState, vec2((slot * ${TEXELS}.0 + 2.5) / uStateSize, 0.5));
+}
+`
+
+/** The fog at a point, through the warp (with FOG_TEXEL_GLSL). Needs WARP_GLSL, FOG_TINT_GLSL and uState / uStateSize. */
+export const FOG_LOOKUP_GLSL = /* glsl */ `
+${FOG_TEXEL_GLSL}
+// The fog at a point of province P: its own state, blended with each neighbour's over FOG_BLEND across their border
+// (the border distances rr_province measures, so the blend follows the warped border). No province (slot -1, the
+// sea): wall.
+TDFog td_fogAt(RRProv P) {
+  TDFog f = TDFog(vec4(0.0), 0.0);
+  if (P.slot < 0.0) {
+    f.wall = 1.0;
+    return f;
+  }
+  const float h = ${(FOG_BLEND / 2).toFixed(3)};
+  td_add(f, td_fogOf(P.hex), smoothstep(-h, h, P.d));
+  for (int i = 0; i < 6; i++)
+    if (P.dn[i] < h) td_add(f, td_fogOf(P.hex + RR_DIRS[i]), 1.0 - smoothstep(-h, h, P.dn[i]));
+  return f;
 }
 `
 
@@ -318,7 +454,22 @@ export interface TerrainUniforms {
   uWarpBox: { value: THREE.Vector4 }
   /** Direction towards the sun (world space, normalised): snow in its shade turns blue. */
   uSun: { value: THREE.Vector3 }
+  /** The zone's bounds without its wall ring (field.ts `bounds.inner`: min x, min z, max x, max z), for the walls' fog. */
+  uInner: { value: THREE.Vector4 }
 }
+
+/** What the fog of war reads (`windPatch` for plants, mist.ts): the state texture, the province lookup and uInner. */
+export type FogUniforms = Pick<TerrainUniforms, 'uTime' | 'uState' | 'uStateSize' | 'uRect' | 'uRim' | 'uWarp' | 'uWarpBox' | 'uInner'>
+
+/** The fog's uniform declarations, for a shader that reads it. */
+export const FOG_UNIFORMS_GLSL = /* glsl */ `
+uniform sampler2D uState;
+uniform float uStateSize;
+uniform vec4 uRect;
+uniform vec4 uRim;
+uniform sampler2D uWarp;
+uniform vec4 uWarpBox;
+uniform vec4 uInner;`
 
 /** Width of the ink line along a province border, in world units (a hex is 2 across its corners). */
 const INK_WIDTH = 0.024
@@ -357,12 +508,15 @@ uniform vec4 uRim;
 uniform sampler2D uWarp;
 uniform vec4 uWarpBox;
 uniform vec3 uSun;
+uniform vec4 uInner;
 varying vec3 vWPos;
 varying float vRock;
 varying float vCoast;
 ${NOISE_GLSL}
 ${CLOUD_GLSL}
 ${WARP_GLSL}
+${FOG_TINT_GLSL}
+${FOG_LOOKUP_GLSL}
 vec4 rr_state(float slot, float texel) {
   if (slot < 0.0) return vec4(0.0);
   return texture2D(uState, vec2((slot * ${TEXELS}.0 + texel + 0.5) / uStateSize, 0.5));
@@ -395,7 +549,10 @@ float rr_lum = dot(diffuseColor.rgb, vec3(0.2126, 0.7152, 0.0722));
 diffuseColor.rgb *= 1.0 - rr_ink * mix(0.24, 0.14, smoothstep(0.15, 0.6, rr_lum));
 // A target province takes a faint wash of the hint, inside its whole outline.
 if (rr_s0.r > 0.5) diffuseColor.rgb = mix(diffuseColor.rgb, uHint, 0.12 * (1.0 - smoothstep(0.0, 0.5, rr_rim)));
-diffuseColor.rgb *= 1.0 - rr_cloud(vWPos.xz, uTime);`,
+diffuseColor.rgb *= 1.0 - rr_cloud(vWPos.xz, uTime);
+// Fog of war (§15.4): the province's state from texel 2, blended with its neighbours' across the warped border.
+TDFog rr_fog = td_fogAt(rr_prov);
+diffuseColor.rgb = td_tint(diffuseColor.rgb, rr_fog, vWPos.xz, rr_fog.w.x > 0.0 ? td_mistNoise(vWPos.xz, uTime) : 0.0);`,
       )
       .replace(
         '#include <normal_fragment_maps>',
@@ -440,12 +597,10 @@ if (rr_s0.g > 0.25) {
 }`,
       )
   }
-  mat.customProgramCacheKey = () => 'td-terrain-organic-2'
+  mat.customProgramCacheKey = () => 'td-terrain-fog-1'
   return mat
 }
 
-/** A colour as a GLSL vec3 (its linear working-space values, as the shaders work in). */
-const glsl = (c: THREE.Color) => `vec3(${c.r.toFixed(4)}, ${c.g.toFixed(4)}, ${c.b.toFixed(4)})`
 /** What the water reflects at grazing angles, and its shore foam: muted to the dusk. */
 const DUSK_SKY = new THREE.Color('#6f7f8c')
 const FOAM = new THREE.Color('#7f8b8d')
@@ -460,6 +615,7 @@ export interface WaterUniforms {
   uRim: { value: THREE.Vector4 }
   uWarp: { value: THREE.DataTexture }
   uWarpBox: { value: THREE.Vector4 }
+  uInner: { value: THREE.Vector4 }
 }
 
 export function makeWaterMaterial(uniforms: WaterUniforms): THREE.ShaderMaterial {
@@ -496,10 +652,13 @@ uniform vec4 uRect;
 uniform vec4 uRim;
 uniform sampler2D uWarp;
 uniform vec4 uWarpBox;
+uniform vec4 uInner;
 varying vec3 vWPos;
 varying float vDepth;
 ${NOISE_GLSL}
 ${WARP_GLSL}
+${FOG_TINT_GLSL}
+${FOG_LOOKUP_GLSL}
 vec2 grad(vec2 p, float t) {
   float e = 0.04;
   float a = rr_snoise(p + vec2(t * 0.11, t * 0.07)) + 0.5 * rr_snoise(p * 2.3 - vec2(t * 0.17, -t * 0.05));
@@ -535,6 +694,9 @@ void main() {
     if (s0.r > 0.5) col += uHint * (1.0 - smoothstep(0.0, 0.1, d)) * (0.6 + 0.4 * sin(uTime * 3.4)) * 1.1;
     if (s0.g > 0.25) col += (s0.g > 0.75 ? vec3(0.45, 1.0, 0.4) : vec3(1.0, 0.3, 0.2)) * (1.0 - smoothstep(0.0, 0.065, d));
   }
+  // Fog of war, as on the ground (the sea, no province, is the Hush).
+  TDFog fog = td_fogAt(prov);
+  col = td_tint(col, fog, vWPos.xz, fog.w.x > 0.0 ? td_mistNoise(vWPos.xz, uTime) : 0.0);
   gl_FragColor = vec4(col, clamp(alpha, 0.0, 1.0));
   #include <tonemapping_fragment>
   #include <colorspace_fragment>
@@ -545,16 +707,31 @@ void main() {
 
 /**
  * Wind for instanced plants: each vertex sways by its height above the plant's base, in gusts that roll across the
- * board. `stiffness` scales the sway (trees 1, grass and flowers more).
+ * board. `sway` scales it (trees 0.07, grass and flowers more; 0 for none). Given the fog's uniforms too, a plant reads
+ * texel 2 of the province at its instance's origin (through the warp, as the ground does): unseen, it scales to
+ * nothing; otherwise it takes the ground's treatment of its state (remembered and wall desaturated, sunk sunk into the
+ * Hush).
  */
-export function windPatch(mat: THREE.Material, uniforms: { uTime: { value: number } }, sway: number, key: string) {
+export function windPatch(mat: THREE.Material, uniforms: { uTime: { value: number } } & Partial<FogUniforms>, sway: number, key: string) {
+  const fog = !!uniforms.uState
   mat.onBeforeCompile = (shader) => {
-    shader.uniforms.uTime = uniforms.uTime
+    Object.assign(shader.uniforms, fog ? uniforms : { uTime: uniforms.uTime })
     shader.fragmentShader = shader.fragmentShader
-      .replace('#include <common>', `#include <common>\nuniform float uTime;\nvarying vec3 rr_wpos;\n${NOISE_GLSL}\n${CLOUD_GLSL}`)
-      .replace('#include <color_fragment>', `#include <color_fragment>\ndiffuseColor.rgb *= 1.0 - rr_cloud(rr_wpos.xz, uTime);`)
+      .replace(
+        '#include <common>',
+        `#include <common>\nuniform float uTime;\nvarying vec3 rr_wpos;\n${NOISE_GLSL}\n${CLOUD_GLSL}` +
+          (fog ? `\nuniform vec4 uInner;\nvarying vec4 rr_fog;\n${FOG_TINT_GLSL}` : ''),
+      )
+      .replace(
+        '#include <color_fragment>',
+        `#include <color_fragment>\ndiffuseColor.rgb *= 1.0 - rr_cloud(rr_wpos.xz, uTime);` +
+          (fog ? `\ndiffuseColor.rgb = td_tint(diffuseColor.rgb, td_one(rr_fog), rr_wpos.xz, 0.0);` : ''),
+      )
     shader.vertexShader = shader.vertexShader
-      .replace('#include <common>', `#include <common>\nuniform float uTime;\nvarying vec3 rr_wpos;`)
+      .replace(
+        '#include <common>',
+        `#include <common>\nuniform float uTime;\nvarying vec3 rr_wpos;` + (fog ? `${FOG_UNIFORMS_GLSL}\nvarying vec4 rr_fog;\n${WARP_GLSL}\n${FOG_TEXEL_GLSL}` : ''),
+      )
       .replace(
         '#include <begin_vertex>',
         `#include <begin_vertex>
@@ -569,7 +746,13 @@ export function windPatch(mat: THREE.Material, uniforms: { uTime: { value: numbe
   float rr_s = (sin(uTime * 1.9 + rr_ph) * 0.65 + sin(uTime * 3.7 + rr_ph * 1.7) * 0.25) * rr_gust;
   vec2 rr_off = vec2(0.8, 0.45) * rr_s * ${sway.toFixed(3)} * pow(rr_h, 1.5);
   transformed.x += rr_off.x;
-  transformed.z += rr_off.y;`,
+  transformed.z += rr_off.y;` +
+          (fog
+            ? `
+  // Fog of war: the province at the instance's origin; an unseen plant (not on a wall) scales to nothing.
+  rr_fog = td_fogOf(rr_hexOf((modelMatrix * vec4(rr_base, 1.0)).xz));
+  if (rr_fog.a < 0.5 && rr_fog.r < 1.0 / 6.0) transformed *= 0.0;`
+            : ''),
       )
       .replace(
         '#include <worldpos_vertex>',
@@ -581,7 +764,32 @@ export function windPatch(mat: THREE.Material, uniforms: { uTime: { value: numbe
 #endif`,
       )
   }
-  mat.customProgramCacheKey = () => `rr-wind2-${key}`
+  mat.customProgramCacheKey = () => `rr-wind2-${key}${fog ? '-fog1' : ''}`
+}
+
+/**
+ * The fog of war on a plain lit material (roads): each fragment finds its province through the warp and takes the
+ * ground's treatment of its fog, blended across the borders as on the ground.
+ */
+export function fogPatch(mat: THREE.Material, uniforms: FogUniforms, key: string) {
+  mat.onBeforeCompile = (shader) => {
+    Object.assign(shader.uniforms, uniforms)
+    shader.vertexShader = shader.vertexShader
+      .replace('#include <common>', `#include <common>\nvarying vec3 td_wpos;`)
+      .replace('#include <begin_vertex>', `#include <begin_vertex>\ntd_wpos = (modelMatrix * vec4(transformed, 1.0)).xyz;`)
+    shader.fragmentShader = shader.fragmentShader
+      .replace(
+        '#include <common>',
+        `#include <common>\nuniform float uTime;${FOG_UNIFORMS_GLSL}\nvarying vec3 td_wpos;\n${NOISE_GLSL}\n${WARP_GLSL}\n${FOG_TINT_GLSL}\n${FOG_LOOKUP_GLSL}`,
+      )
+      .replace(
+        '#include <color_fragment>',
+        `#include <color_fragment>
+TDFog td_f = td_fogAt(rr_province(td_wpos.xz, true));
+diffuseColor.rgb = td_tint(diffuseColor.rgb, td_f, td_wpos.xz, td_f.w.x > 0.0 ? td_mistNoise(td_wpos.xz, uTime) : 0.0);`,
+      )
+  }
+  mat.customProgramCacheKey = () => `td-fog1-${key}`
 }
 
 // ---------------------------------------------------------------- shadows and compiling ahead

@@ -1,14 +1,20 @@
 // The zone's world: the world core's terrain, water, plants and roads (src/world/) under a dusk sky, seen from a
 // portrait camera that fits the zone's width (§15.3, §15.5). Beyond the wall ring lies the Hush, dark slate in fog;
-// there is no tray. Task 11 adds the hero, Landmarks, the follow camera and tapping.
+// there is no tray. The fog of war (§15.4) dims what the hero hasn't seen, under a mist. Task 11 adds the hero,
+// Landmarks, the follow camera and tapping.
 // oxlint-disable react/immutability -- three.js objects (the camera, fog, lights, uniforms and shadow map) change in place.
 import { Canvas, useFrame, useThree } from '@react-three/fiber'
 import { useEffect, useLayoutEffect, useMemo, useRef } from 'react'
 import * as THREE from 'three'
+import { toOffset } from '../rules/hex.ts'
+import type { Fog } from '../rules/sight.ts'
 import type { WorldCell } from '../world/adapter.ts'
 import { buildField, type Field } from '../world/field.ts'
-import { SLOTS, TEXELS, boardShape, makeStateTexture, makeTerrainMaterial, makeWaterMaterial, noWarpTexture } from '../world/materials.ts'
+import { writeFog } from '../world/fog.ts'
+import { SLOTS, TEXELS, boardShape, fogPatch, makeStateTexture, makeTerrainMaterial, makeWaterMaterial, noWarpTexture } from '../world/materials.ts'
+import { makeMist } from '../world/mist.ts'
 import { buildRoads } from '../world/roads.ts'
+import { hexIndex, writeCells } from '../world/terrainMesh.ts'
 import { SMALL_SCREEN, useWorld, useWorldClient } from '../world/useWorld.ts'
 import type { WorldClient } from '../world/worldClient.ts'
 
@@ -16,6 +22,8 @@ export interface WorldSceneProps {
   world: Record<string, WorldCell>
   /** Mesh and plant density (useWorld.ts detailFor). */
   detail: number
+  /** The fog of war, by offset key "row,col" (rules/sight.ts; a hex missing from it is unseen). None: all in sight. */
+  fog?: Map<string, Fog>
 }
 
 /** The Hush beyond the walls: the fog's colour and the sky's. */
@@ -34,7 +42,7 @@ const HEMI = { sky: 0x8ea3c2, ground: 0x2a221d, intensity: 0.75 }
 /** Test hooks (window.__worldReady) only with ?test=1 in the URL (R6). */
 const TEST = typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('test') === '1'
 
-export default function WorldScene({ world, detail }: WorldSceneProps) {
+export default function WorldScene({ world, detail, fog }: WorldSceneProps) {
   // The world worker gets the board at once, so the first build runs while the canvas is set up.
   const client = useWorldClient(world, detail)
   return (
@@ -50,13 +58,13 @@ export default function WorldScene({ world, detail }: WorldSceneProps) {
           gl.toneMapping = THREE.ACESFilmicToneMapping
         }}
       >
-        <Scene world={world} client={client} />
+        <Scene world={world} client={client} fog={fog} />
       </Canvas>
     </div>
   )
 }
 
-function Scene({ world, client }: { world: Record<string, WorldCell>; client: WorldClient }) {
+function Scene({ world, client, fog }: { world: Record<string, WorldCell>; client: WorldClient; fog?: Map<string, Fog> }) {
   const field = useMemo(() => buildField(world), [world])
   const uniforms = useMemo(
     () => ({
@@ -70,6 +78,8 @@ function Scene({ world, client }: { world: Record<string, WorldCell>; client: Wo
       // The world's warp comes with the world worker's first build (useWorld); none until then.
       uWarp: { value: noWarpTexture() },
       uWarpBox: { value: new THREE.Vector4(0, 0, 1, 1) },
+      uInner: { value: new THREE.Vector4() },
+      uBounds: { value: new THREE.Vector4() },
     }),
     [],
   )
@@ -77,17 +87,57 @@ function Scene({ world, client }: { world: Record<string, WorldCell>; client: Wo
     const { rect, rim } = boardShape(world, field.bounds)
     uniforms.uRect.value.copy(rect)
     uniforms.uRim.value.copy(rim)
+    const { inner: i, ...b } = field.bounds
+    uniforms.uInner.value.set(i.minX, i.minZ, i.maxX, i.maxZ)
+    uniforms.uBounds.value.set(b.minX, b.minZ, b.maxX, b.maxZ)
   }, [world, field, uniforms])
+
+  // Per-hex state for the shaders: each hex's terrain and Landmark (texel 1), then its fog (texel 2), rewritten
+  // whenever the fog changes; nothing is rebuilt.
+  const invalidate = useThree((st) => st.invalidate)
+  const slots = useMemo(() => hexIndex(world), [world])
+  const walls = useMemo(() => new Set(Object.values(world).filter((c) => c.wall).map((c) => offKey(c))), [world])
+  useLayoutEffect(() => writeCells(uniforms.uState.value, slots, world), [uniforms, slots, world])
+  useLayoutEffect(() => {
+    writeFog(uniforms.uState.value, slots, fog ?? new Map(Object.values(world).map((c) => [offKey(c), 3 as const])), walls, new Set())
+    invalidate()
+  }, [uniforms, slots, world, walls, fog, invalidate])
 
   const shadows = useRef(true)
   const { terrain, plants } = useWorld(client, uniforms, () => (shadows.current = true))
-  const roads = useMemo(() => buildRoads(field, world), [field, world])
+  // The roads take the fog too: their shared materials, cloned once per scene and patched (materials.ts fogPatch).
+  const roadMaterials = useMemo(() => new Map<THREE.Material, THREE.Material>(), [])
+  useEffect(() => () => roadMaterials.forEach((m) => m.dispose()), [roadMaterials])
+  const roads = useMemo(() => {
+    const g = buildRoads(field, world)
+    g.traverse((o) => {
+      const mesh = o as THREE.Mesh
+      if (!mesh.isMesh) return
+      const shared = mesh.material as THREE.Material
+      let m = roadMaterials.get(shared)
+      if (!m) {
+        m = shared.clone()
+        fogPatch(m, uniforms, 'road')
+        roadMaterials.set(shared, m)
+      }
+      mesh.material = m
+    })
+    return g
+  }, [field, world, uniforms, roadMaterials])
   useEffect(() => {
     shadows.current = true
     return () => (roads.userData.dispose as () => void)()
   }, [roads])
   const materials = useMemo(() => ({ terrain: makeTerrainMaterial(uniforms), water: makeWaterMaterial(uniforms) }), [uniforms])
   useEffect(() => () => Object.values(materials).forEach((m) => m.dispose()), [materials])
+  const mist = useMemo(() => makeMist(uniforms), [uniforms])
+  useEffect(
+    () => () => {
+      mist.geometry.dispose()
+      ;(mist.material as THREE.Material).dispose()
+    },
+    [mist],
+  )
 
   // The first frame with the world in it, then the next: the world has been drawn (R4).
   const drawn = useRef(0)
@@ -105,9 +155,16 @@ function Scene({ world, client }: { world: Record<string, WorldCell>; client: Wo
       {terrain?.water && <mesh geometry={terrain.water} material={materials.water} renderOrder={2} matrixAutoUpdate={false} />}
       <primitive object={plants.group} dispose={null} />
       <primitive object={roads} dispose={null} />
+      {terrain && <primitive object={mist} dispose={null} />}
       <ShadowRefresh need={shadows} />
     </>
   )
+}
+
+/** A world cell's rules key, offset "row,col" (rules/hex.ts). */
+const offKey = (c: WorldCell) => {
+  const o = toOffset(c)
+  return `${o.row},${o.col}`
 }
 
 /**

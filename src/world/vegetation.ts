@@ -14,7 +14,7 @@ import type { WorldCell } from './adapter.ts'
 import { SQRT3, WARP, WATER_LEVEL, fbm, fray, hash01, hexCenter, smoothstep, type Field, type Probe, type Rect } from './field.ts'
 import { flowersOf } from './flora.ts'
 import { onRim } from './layout.ts'
-import { castShadows, windPatch } from './materials.ts'
+import { castShadows, windPatch, type FogUniforms } from './materials.ts'
 import { LATTICE } from './terrainMesh.ts'
 
 /** Hex centres keep a clearing this wide for the hero and Landmarks. */
@@ -504,7 +504,8 @@ export class PlantMeshes {
   readonly group = new THREE.Group()
   private parts: Part[]
 
-  constructor(uniforms: { uTime: { value: number } }) {
+  /** With the fog's uniforms (materials.ts FogUniforms) the plants show the fog of war (`windPatch`). */
+  constructor(uniforms: { uTime: { value: number } } & Partial<FogUniforms>) {
     const plant = (sway: number, key: string, opts: THREE.MeshStandardMaterialParameters = {}) => {
       const m = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.85, metalness: 0, ...opts })
       windPatch(m, uniforms, sway, key)
@@ -526,7 +527,8 @@ export class PlantMeshes {
       // Flower stems stand on the heads' spots, untinted.
       part('flower', stem(), plant(2.2, 'stem'), false, false),
       part('flower', bloom(), plant(2.2, 'bloom', { roughness: 0.6 }), false),
-      part('rock', boulder(7), new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.95, flatShading: true }), true),
+      // Rocks don't sway; the patch gives them the fog.
+      part('rock', boulder(7), plant(0, 'rock', { roughness: 0.95, flatShading: true }), true),
     ]
   }
 

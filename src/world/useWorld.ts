@@ -8,7 +8,7 @@ import { useThree } from '@react-three/fiber'
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type * as THREE from 'three'
 import type { WorldCell } from './adapter.ts'
-import { makeWarpTexture, warpBoxUniform } from './materials.ts'
+import { makeWarpTexture, warpBoxUniform, type FogUniforms } from './materials.ts'
 import { applyTerrain, type TerrainGeometry } from './terrainMesh.ts'
 import { PlantMeshes } from './vegetation.ts'
 import type { WorldUpdate } from './worldBuild.ts'
@@ -87,7 +87,7 @@ export interface World {
  */
 export function useWorld(
   client: WorldClient,
-  uniforms: { uTime: { value: number }; uWarp: { value: THREE.DataTexture }; uWarpBox: { value: THREE.Vector4 } },
+  uniforms: { uTime: { value: number }; uWarp: { value: THREE.DataTexture }; uWarpBox: { value: THREE.Vector4 } } & Partial<FogUniforms>,
   changed: () => void,
 ): World {
   const invalidate = useThree((st) => st.invalidate)
