@@ -55,13 +55,22 @@ test('canMove reports impassable, wall and sunk', () => {
 })
 
 test('lighting a beacon: +1 max ember, radius-2 memory, one rumour, once', () => {
-  const z = mk(grid(8, 6), undefined, { '0,0': 'start', '1,0': 'beacon', '7,5': 'hearth' })
-  let s = newRun(z, 'Wren')
-  s = move(s, { row: 1, col: 0 })
-  assert.deepEqual(s.lit, ['1,0']); assert.equal(s.hero.maxEmber, 7); assert.equal(s.hero.ember, 4)
-  for (const [k, c] of z.cells) if (distance({ row: 1, col: 0 }, c) <= 2) assert.ok((s.fog.get(k) ?? 0) >= 2, k)
+  // row 3 is forest, hiding (3,0) and (3,1) from the beacon at (1,0); (0,0) is marked sunk
+  const z = mk(['MMMMMM', 'MMMMMM', 'MMMMMM', 'FFFFFF', 'MMMMMM', 'MMMMMM', 'MMMMMM', 'MMMMMM'], undefined,
+    { '1,0': 'start', '2,0': 'beacon', '7,5': 'hearth' })
+  const s0 = newRun(z, 'Wren')
+  assert.equal(s0.fog.get('3,0') ?? 0, 3) // forest row itself is seen
+  assert.equal(s0.fog.get('4,0') ?? 0, 0) // behind the forest: unseen
+  const sunkCell = '0,0'
+  let s = { ...s0, fog: new Map(s0.fog).set(sunkCell, 1 as const) }
+  s = move(s, { row: 2, col: 0 })
+  assert.deepEqual(s.lit, ['2,0']); assert.equal(s.hero.maxEmber, 7); assert.equal(s.hero.ember, 4)
+  assert.equal(s.fog.get(sunkCell), 1) // sunk stays sunk (within 2 of the beacon)
+  assert.ok(distance({ row: 2, col: 0 }, { row: 0, col: 0 }) <= 2)
+  assert.ok((s.fog.get('4,0') ?? 0) >= 2) // behind the forest, within 2: remembered
+  for (const [k, c] of z.cells) if (distance({ row: 2, col: 0 }, c) <= 2 && k !== sunkCell) assert.ok((s.fog.get(k) ?? 0) >= 2, k)
   assert.deepEqual(s.rumours, ['7,5'])
-  const back = move(move(s, { row: 0, col: 0 }), { row: 1, col: 0 })
+  const back = move(move(s, { row: 1, col: 0 }), { row: 2, col: 0 })
   assert.equal(back.hero.maxEmber, 7); assert.equal(back.rumours.length, 1); assert.equal(back.lit.length, 1)
 })
 
@@ -133,19 +142,39 @@ test('path avoids sunk and wall hexes', () => {
 })
 
 test('no affordable move still allows camp and pressing on', () => {
-  const z = mk(['FFF', 'FFF', 'FFF'], undefined, { '1,1': 'start' })
-  const s0 = newRun(z, 'Wren')
-  const s = { ...s0, steps: 3 }
+  const z = mk(['WWW', 'WWW', 'WWW'], undefined, { '1,1': 'start' })
+  const s = { ...newRun(z, 'Wren'), steps: 3 }
   const around = [...z.cells.values()].filter((c) => distance(s.at, c) === 1)
-  for (const c of around) {
-    const k = canMove({ ...s, steps: 2 }, c)
-    assert.deepEqual(k, { ok: false, reason: 'steps' })
-  }
-  assert.equal(pressOn(s), s) // steps not 0: unchanged
+  assert.equal(around.length, 6)
+  for (const c of around) assert.deepEqual(canMove(s, c), { ok: false, reason: 'steps' })
   assert.doesNotThrow(() => camp(s, ['rest']))
-  const p = pressOn({ ...s, steps: 0 })
-  assert.equal(p.night, true); assert.equal(p.nightSteps, 2)
+  const p = pressOn(s)
+  assert.equal(p.night, true); assert.equal(p.nightSteps, 5); assert.equal(p.steps, 0)
   assert.equal(pressOn(p), p)
+  assert.equal(pressOn({ ...s, status: 'expired' }).night, false)
+})
+
+test('pressOn is refused while an affordable move exists', () => {
+  const s = { ...meadow(4), steps: 2 }
+  assert.equal(pressOn(s), s)
+})
+
+test('camp does nothing once the run is over', () => {
+  const s = { ...meadow(3), status: 'hearth' as const }
+  assert.equal(camp(s, ['rest']), s)
+})
+
+test('a pushed hero falls back to the push destination, not a sunk hex', () => {
+  const z = mk(grid(14), undefined, { '3,0': 'start' })
+  z.cells.get('7,0')!.terrain = 'mountain'; z.cells.get('7,0')!.level = 2
+  z.links.add(['6,0', '7,0'].sort().join('|'))
+  const s0 = newRun(z, 'Wren')
+  const d = camp({ ...s0, furthestRow: 10 }, ['rest'])
+  assert.deepEqual(d.lastCamp, d.at)
+  assert.ok(d.lastCamp.row >= d.sunkBelow)
+  const f = move({ ...d, hero: { ...d.hero, vigour: 1 }, steps: 6 }, { row: 7, col: 0 })
+  assert.ok(f.events.some((e) => e.kind === 'fell'))
+  assert.deepEqual(f.at, d.lastCamp); assert.ok(f.at.row >= d.sunkBelow)
 })
 
 test('night steps spend the night pool', () => {

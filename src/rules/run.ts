@@ -147,8 +147,9 @@ export function path(s: RunState, to: Off): { path: Off[]; costs: number[] } | n
 }
 
 export function pressOn(s: RunState): RunState {
-  if (s.status !== 'walking' || s.steps !== 0 || s.night) return s
-  return { ...s, night: true, nightSteps: NIGHT_STEPS, fog: reveal(s.fog, visible(s.zone, s.at, true)) }
+  if (s.status !== 'walking' || s.night) return s
+  if (neighbours(s.at).some((n) => canMove(s, n).ok)) return s
+  return { ...s, night: true, nightSteps: NIGHT_STEPS + s.steps, steps: 0, fog: reveal(s.fog, visible(s.zone, s.at, true)) }
 }
 
 export function campOptions(s: RunState): { safe: boolean; picks: 2 | 3 } {
@@ -183,6 +184,7 @@ function dawn(s: RunState): RunState {
       .sort((a, b) => distance(at, a) - distance(at, b) || cmpOff(a, b))[0]
     if (dest) {
       out.at = dest
+      out.lastCamp = dest
       out.events.push({ kind: 'pushed', at: dest, day: out.day })
     }
   }
@@ -191,6 +193,7 @@ function dawn(s: RunState): RunState {
 }
 
 export function camp(s: RunState, actions: NightAction[]): RunState {
+  if (s.status !== 'walking') return s
   const { picks } = campOptions(s)
   if (actions.length < 1 || actions.length > picks || new Set(actions).size !== actions.length) {
     throw new Error(`camp needs 1 to ${picks} distinct actions`)
