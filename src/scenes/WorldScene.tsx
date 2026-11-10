@@ -11,6 +11,9 @@
 // hero's rim and silhouette, the path) is compiled on stand-ins, so neither the first frame nor the first tap stops to
 // compile. The lantern is the scene's one point light, there from the start, so the programs compiled ahead are the
 // ones drawn.
+//
+// On phones (SMALL_SCREEN) the scene draws on demand: 30 frames a second while only idle animation runs, every frame
+// while the hero walks, the camera eases or a pinch zooms; the shadows redraw only when something changes.
 // oxlint-disable react/immutability -- three.js objects (the camera, fog, lights, uniforms and shadow map) change in place.
 import { Canvas, useFrame, useThree } from '@react-three/fiber'
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
@@ -58,6 +61,11 @@ export interface WorldSceneProps {
   onTap: (o: Off) => void
   /** Mesh and plant density (useWorld.ts detailFor). */
   detail: number
+  /**
+   * Called once the world has been drawn (when `window.__worldReady` is set, R4), with when this view mounted and
+   * began to build it (performance.now() ms), for the performance overlay.
+   */
+  onReady?: (startedAt: number) => void
 }
 
 /** The Hush beyond the walls: the fog's colour and the sky's. */
@@ -85,6 +93,9 @@ export const STEP_SECONDS = 0.35
 const BESIDE: Pt = { x: 0.5, z: 0.18 }
 /** The path preview: a tube this far above the ground, this thick, glowing the lantern's colour. */
 const TUBE = { lift: 0.25, radius: 0.028, color: '#ffcf8a', glow: '#ff9a40', intensity: 1.8 }
+/** On phones the scene draws on demand, at this rate while only idle animation runs (Throttle), and every frame
+ * while the hero walks or the camera eases after them. */
+const IDLE_FPS = 30
 /** Stand-ins compiled per task while compiling ahead (each may be a new program). */
 const COMPILE_BATCH = 4
 /** A pointer that moves less than this (CSS px) and lifts within TAP_MS is a tap. */
@@ -112,12 +123,14 @@ function prepareModels() {
   return kinds.map(([key]) => key)
 }
 
-export default function WorldScene({ run, world, preview, onTap, detail }: WorldSceneProps) {
+export default function WorldScene({ run, world, preview, onTap, detail, onReady }: WorldSceneProps) {
   // The world worker gets the board at once, so the first build runs while the canvas is set up.
   const client = useWorldClient(world, detail)
+  const [startedAt] = useState(() => performance.now())
   return (
     <div style={{ position: 'fixed', inset: 0, background: DUSK, touchAction: 'none' }} role="img" aria-label="The zone">
       <Canvas
+        frameloop={SMALL_SCREEN ? 'demand' : 'always'}
         // PCF soft shadows: three.js r186 removed PCFSoftShadowMap (it falls back with a warning); its PCF is the soft
         // one. They redraw only when something changes (ShadowRefresh).
         shadows={{ type: THREE.PCFShadowMap, autoUpdate: false }}
@@ -128,7 +141,8 @@ export default function WorldScene({ run, world, preview, onTap, detail }: World
           gl.toneMapping = THREE.ACESFilmicToneMapping
         }}
       >
-        <Scene world={world} client={client} run={run} preview={preview} onTap={onTap} />
+        <Scene world={world} client={client} run={run} preview={preview} onTap={onTap} onReady={onReady && (() => onReady(startedAt))} />
+        {SMALL_SCREEN && <Throttle fps={IDLE_FPS} />}
       </Canvas>
     </div>
   )
@@ -140,9 +154,10 @@ interface SceneProps {
   run: RunState
   preview: Off[] | null
   onTap: (o: Off) => void
+  onReady?: () => void
 }
 
-function Scene({ world, client, run, preview, onTap }: SceneProps) {
+function Scene({ world, client, run, preview, onTap, onReady }: SceneProps) {
   const gl = useThree((st) => st.gl)
   const camera = useThree((st) => st.camera) as THREE.PerspectiveCamera
   const scene = useThree((st) => st.scene)
@@ -304,6 +319,15 @@ function Scene({ world, client, run, preview, onTap }: SceneProps) {
         for (const s of stands.slice(i, i + COMPILE_BATCH)) waits.push(warmUp(gl, s, camera, scene))
       }
       await Promise.all(waits)
+      // Each program's first use, a program a task: three.js reads its link status and uniforms then, which waits for
+      // the driver to finish linking it; without KHR_parallel_shader_compile (SwiftShader, some phones) compileAsync
+      // can't wait for that, and the first frame to draw with a program (the path preview, a Landmark first seen)
+      // stalled in play.
+      for (const p of gl.info.programs ?? []) {
+        await nextTask()
+        if (!live) return
+        p.getUniforms()
+      }
       if (live) setCompiled(true)
     }
     go()
@@ -359,7 +383,8 @@ function Scene({ world, client, run, preview, onTap }: SceneProps) {
     if (distance(was, run.at) === 0) return
     walk.current = { from: hero.position.clone(), to, t: 0 }
     hero.rotation.y = Math.atan2(to.x - hero.position.x, to.z - hero.position.z)
-  }, [run.at, spotOf, hero])
+    invalidate()
+  }, [run.at, spotOf, hero, invalidate])
 
   const zoom = useRef(1)
   const focus = useRef<THREE.Vector3 | null>(null)
@@ -385,7 +410,12 @@ function Scene({ world, client, run, preview, onTap }: SceneProps) {
     else focus.current.lerp(target, 1 - Math.pow(2, -dt / CAMERA.halfLife))
     follow(camera, scene, focus.current, state.size, zoom.current)
     // The first frame with the world in it, then the next: the world has been drawn (R4).
-    if (shown && drawn.current < 2 && ++drawn.current === 2 && TEST) hooks.__worldReady = true
+    if (shown && drawn.current < 2 && ++drawn.current === 2) {
+      if (TEST) hooks.__worldReady = true
+      onReady?.()
+    }
+    // While the hero walks or the camera eases, every frame is drawn (on phones the scene draws on demand).
+    if (w || focus.current.distanceToSquared(target) > 1e-4) invalidate()
   })
 
   // Taps and pinches on the canvas. A tap raycasts to the ground, finds the province under the point through the warp
@@ -408,7 +438,9 @@ function Scene({ world, client, run, preview, onTap }: SceneProps) {
     }
     const clampZoom = (z: number) => Math.min(CAMERA.zoom[1], Math.max(CAMERA.zoom[0], z))
     const ray = new THREE.Raycaster()
+    let t0 = 0
     const tap = (x: number, y: number) => {
+      t0 = performance.now()
       const mesh = terrainMesh.current
       if (!mesh) return
       const r = el.getBoundingClientRect()
@@ -427,7 +459,8 @@ function Scene({ world, client, run, preview, onTap }: SceneProps) {
       report(toOffset(hexAt(w.x, w.z)), 'ground')
     }
     const report = (o: Off, via: 'landmark' | 'ground') => {
-      if (TEST) hooks.__lastTap = { ...o, via }
+      // With the time the raycast and pick took (ms).
+      if (TEST) hooks.__lastTap = { ...o, via, ms: performance.now() - t0 }
       tapRef.current(o)
     }
     const onDown = (e: PointerEvent) => {
@@ -443,7 +476,10 @@ function Scene({ world, client, run, preview, onTap }: SceneProps) {
       if (!p) return
       p.x = e.clientX
       p.y = e.clientY
-      if (pinch && down.size === 2) zoom.current = clampZoom((pinch.z0 * spread()) / pinch.d0)
+      if (pinch && down.size === 2) {
+        zoom.current = clampZoom((pinch.z0 * spread()) / pinch.d0)
+        invalidate()
+      }
     }
     const onUp = (e: PointerEvent) => {
       const p = down.get(e.pointerId)
@@ -455,6 +491,7 @@ function Scene({ world, client, run, preview, onTap }: SceneProps) {
     const onWheel = (e: WheelEvent) => {
       e.preventDefault()
       zoom.current = clampZoom(zoom.current * Math.exp(-e.deltaY * 0.0015))
+      invalidate()
     }
     el.addEventListener('pointerdown', onDown)
     el.addEventListener('pointermove', onMove)
@@ -468,7 +505,7 @@ function Scene({ world, client, run, preview, onTap }: SceneProps) {
       el.removeEventListener('pointercancel', onUp)
       el.removeEventListener('wheel', onWheel)
     }
-  }, [gl, camera, field, picks])
+  }, [gl, camera, field, picks, invalidate])
 
   // Test hooks (?test=1, R6): tap a hex, read the run, the preview, the reachable hexes, the hex the last real tap
   // named and whether a Landmark or the ground named it (`__lastTap`), and the hero's place, and project a point at the height of a hex's centre (offset dx, dz from
@@ -483,13 +520,15 @@ function Scene({ world, client, run, preview, onTap }: SceneProps) {
     if (!TEST) return
     hooks.__tap = (row: number, col: number) => tapRef.current({ row, col })
     hooks.__heroAt = () => hero.position.toArray()
+    // The shader programs compiled so far (none should be added in play).
+    hooks.__programs = () => gl.info.programs?.length ?? 0
     hooks.__project = (row: number, col: number, dx = 0, dz = 0, dy = 0) => {
       const { q, r } = toAxial({ row, col })
       const c = hexCenter(q, r)
       const v = new THREE.Vector3(c.x + dx, ground(c.x, c.z) + dy, c.z + dz).project(camera)
       return [((v.x + 1) / 2) * size.width, ((1 - v.y) / 2) * size.height]
     }
-  }, [hero, ground, camera, size])
+  }, [hero, ground, camera, size, gl])
 
   return (
     <>
@@ -631,6 +670,16 @@ function Lights({ field }: { field: Field }) {
       <directionalLight ref={sun} color={SUN_COLOR} intensity={SUN_INTENSITY} castShadow />
     </>
   )
+}
+
+/** Draws the scene at `fps` on demand (phones): idle animation (the lantern's flicker, the wind) at a steady rate. */
+function Throttle({ fps }: { fps: number }) {
+  const invalidate = useThree((st) => st.invalidate)
+  useEffect(() => {
+    const id = setInterval(() => invalidate(), 1000 / fps)
+    return () => clearInterval(id)
+  }, [invalidate, fps])
+  return null
 }
 
 /** Shadows redraw (three.js renders the shadow map) only when something changed, not every frame. */
