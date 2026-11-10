@@ -147,27 +147,28 @@ function tourDays(z: Zone, start: Off, beacons: Off[], hearth: Off): { at6: numb
 
 const landmarksOf = (z: Zone, kind: LandmarkKind): ZCell[] => [...z.cells.values()].filter((c) => c.landmark === kind)
 
+/** Each reason starts with one of: 'ends:', 'hearth:', 'tour-long:', 'tour-short:', 'unreachable:', 'camp:', 'cave:'. */
 export function checkFairness(z: Zone): Fairness {
   const [start] = landmarksOf(z, 'start'), [hearth] = landmarksOf(z, 'hearth')
-  if (!start || !hearth) return { ok: false, reasons: ['no start or no hearth'], hearthDays: Infinity, tourDays: Infinity, tourDays6: Infinity }
+  if (!start || !hearth) return { ok: false, reasons: ['ends: no start or no hearth'], hearthDays: Infinity, tourDays: Infinity, tourDays6: Infinity }
   const reasons: string[] = []
   const fromStart = shortestTree(z, start)
 
   const toHearth = pathIn(z, fromStart, hearth)
   const hearthDays = toHearth ? daysFor(toHearth.costs) : Infinity
-  if (hearthDays > MAX_HEARTH_DAYS) reasons.push(`hearth takes ${hearthDays.toFixed(2)} days (max ${MAX_HEARTH_DAYS})`)
+  if (hearthDays > MAX_HEARTH_DAYS) reasons.push(`hearth: takes ${hearthDays.toFixed(2)} days (max ${MAX_HEARTH_DAYS})`)
 
   const tour = tourDays(z, start, landmarksOf(z, 'beacon'), hearth)
-  if (tour.at8 > TOUR_MAX_DAYS) reasons.push(`beacon tour takes ${tour.at8.toFixed(2)} days at 8 steps a day (max ${TOUR_MAX_DAYS})`)
-  if (tour.at6 < TOUR_MIN_DAYS) reasons.push(`beacon tour takes ${tour.at6.toFixed(2)} days at 6 steps a day (min ${TOUR_MIN_DAYS})`)
+  if (tour.at8 > TOUR_MAX_DAYS) reasons.push(`tour-long: takes ${tour.at8.toFixed(2)} days at 8 steps a day (max ${TOUR_MAX_DAYS})`)
+  if (tour.at6 < TOUR_MIN_DAYS) reasons.push(`tour-short: takes ${tour.at6.toFixed(2)} days at 6 steps a day (min ${TOUR_MIN_DAYS})`)
 
   for (const c of z.cells.values()) {
-    if (c.landmark && !fromStart.dist.has(key(c))) reasons.push(`${c.landmark} at ${key(c)} is cut off`)
+    if (c.landmark && !fromStart.dist.has(key(c))) reasons.push(`unreachable: ${c.landmark} at ${key(c)}`)
   }
   for (let band = 0; band < z.rows; band += BAND_ROWS) {
-    if (!landmarksOf(z, 'camp').some((c) => c.row >= band && c.row < band + BAND_ROWS)) reasons.push(`no camp in rows ${band}–${band + BAND_ROWS - 1}`)
+    if (!landmarksOf(z, 'camp').some((c) => c.row >= band && c.row < band + BAND_ROWS)) reasons.push(`camp: none in rows ${band}–${Math.min(band + BAND_ROWS, z.rows) - 1}`)
   }
-  if (!landmarksOf(z, 'cave').length) reasons.push('no cave')
+  if (!landmarksOf(z, 'cave').length) reasons.push('cave: none')
 
   return { ok: reasons.length === 0, reasons, hearthDays, tourDays: tour.at8, tourDays6: tour.at6 }
 }
