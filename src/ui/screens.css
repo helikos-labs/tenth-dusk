@@ -4,13 +4,8 @@
 :root {
   /* Light text for the dark plates (the old ink); --td-ink below is the ink on vellum. */
   --td-light: #f1e9dc;
-  --td-dim: #b3aba1;
-  --td-faint: #7d776f;
   --td-ember: #ff9a4a;
-  --td-ember-deep: #e5702c;
-  --td-tile: rgba(255, 255, 255, 0.035);
   --td-night: #0b0e14;
-  --td-serif: var(--td-fell);
   --td-ui: var(--td-garamond);
   /* Materials (§4.1). Vellum: fibre and blotch noise (tiles of 1000 px, stitched) under a warm gradient. */
   --td-vellum-hi: #e3d6b6;
@@ -57,19 +52,6 @@
   /* At class weight, so a button's own class (.td-close, .td-alt, .td-tab…) sets its face. */
   font: inherit;
   color: inherit;
-}
-
-/* Labels on the dark plates: small Fell capitals. */
-.td-label {
-  font-family: var(--td-fell-sc);
-  font-size: 14px;
-  font-weight: 400;
-  letter-spacing: 0.04em;
-  color: var(--td-dim);
-}
-.td-serif {
-  font-family: var(--td-serif);
-  font-weight: 400;
 }
 
 /* Vellum: a page of paper. */
@@ -633,6 +615,7 @@
   gap: 6px;
   margin-bottom: 6px;
 }
+/* The gauges' labels on the wood: small Fell capitals. */
 .td-gauge-head .td-label {
   font-family: var(--td-fell-sc);
   font-size: 14px;
