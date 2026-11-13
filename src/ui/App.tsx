@@ -19,6 +19,7 @@ import CampSheet from './CampSheet.tsx'
 import ChapterEnd from './ChapterEnd.tsx'
 import ChapterIntro from './ChapterIntro.tsx'
 import Hud from './Hud.tsx'
+import { IconSprite } from './Icons.tsx'
 import NameHero from './NameHero.tsx'
 import Pack from './Pack.tsx'
 import PerfOverlay from './PerfOverlay.tsx'
@@ -63,6 +64,7 @@ export default function App() {
 
   return (
     <>
+      <IconSprite />
       {showWorld && (
         <WorldScene
           key={`${run.zone.chapter}:${run.zone.seed}:${scene.n}`}

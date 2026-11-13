@@ -25,7 +25,7 @@ export default function CampSheet({ run, act }: { run: RunState; act: (a: GameAc
           </svg>
         </button>
       </div>
-      <section className="td-sheet td-glass td-fade" aria-labelledby="td-camp-title">
+      <section className="td-sheet td-iron td-glass td-fade" aria-labelledby="td-camp-title">
         <div className="td-sheet-head">
           <h2 id="td-camp-title" className="td-sheet-title">
             Tend the night

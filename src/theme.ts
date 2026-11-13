@@ -1,7 +1,7 @@
 import { createTheme } from '@mui/material/styles'
 
-// The game is dark at dusk whatever the device's setting: CssBaseline paints the page in the Hush's colour, in the UI
-// face (Barlow Semi Condensed, loaded from Google Fonts in index.html). The screens style themselves (ui/screens.css).
+// The game is dark at dusk whatever the device's setting: CssBaseline paints the page in the Hush's colour, in the body
+// face (EB Garamond, loaded from Google Fonts in index.html). The screens style themselves (ui/screens.css).
 export const theme = createTheme({
   palette: {
     mode: 'dark',
@@ -10,7 +10,7 @@ export const theme = createTheme({
   },
   shape: { borderRadius: 10 },
   typography: {
-    fontFamily: '"Barlow Semi Condensed", "Arial Narrow", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif',
+    fontFamily: '"EB Garamond", Georgia, serif',
     button: { textTransform: 'none', fontWeight: 600 },
   },
   components: {

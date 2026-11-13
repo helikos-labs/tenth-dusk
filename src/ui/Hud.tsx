@@ -43,7 +43,7 @@ export default function Hud({ run, preview, walking, blocked, blockedN, notice, 
   return (
     <div className="td-layer td-hud">
       <div className="td-hud-head">
-        <header className="td-top td-glass" data-hud="top">
+        <header className="td-top td-iron td-glass" data-hud="top">
           <div className="td-day">
             <SunArc run={run} />
             <div className="td-day-text">
@@ -63,7 +63,7 @@ export default function Hud({ run, preview, walking, blocked, blockedN, notice, 
             </span>
           </div>
         </header>
-        <section className="td-tracker td-glass" data-hud="tracker" aria-label="Goals">
+        <section className="td-tracker td-iron td-glass" data-hud="tracker" aria-label="Goals">
           <div className="td-goal">
             <span className={run.lit.length >= beacons ? 'td-diamond td-lit' : 'td-diamond'} aria-hidden="true" />
             <span>
@@ -90,7 +90,7 @@ export default function Hud({ run, preview, walking, blocked, blockedN, notice, 
             )
           )}
         </div>
-        <footer className="td-bottom td-glass" data-hud="bottom">
+        <footer className="td-bottom td-iron td-glass" data-hud="bottom">
           <div className="td-gauges">
             <div>
               <div className="td-gauge-head">

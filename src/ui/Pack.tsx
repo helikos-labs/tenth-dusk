@@ -35,7 +35,7 @@ export default function Pack({ run, act }: { run: RunState; act: (a: GameAction)
           </svg>
         </button>
       </header>
-      <section className="td-pack-panel td-glass td-fade">
+      <section className="td-pack-panel td-iron td-glass td-fade">
         <div className="td-tabs" role="tablist">
           <button type="button" role="tab" className="td-tab" aria-selected={tab === 'gear'} onClick={() => setTab('gear')}>
             Gear

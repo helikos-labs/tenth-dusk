@@ -1,17 +1,39 @@
-/* Tenth Dusk's screens and HUD: dark glass over the world, Cormorant Garamond for names and headings, Barlow Semi
-   Condensed for the UI, and ember as the one accent. Text is 12 px or larger; every number has tabular figures. */
+/* Tenth Dusk's screens and HUD (ART-DIRECTION §4): objects of iron, vellum and wood over the world, IM Fell English for
+   names and headings and EB Garamond for the text, and ember only where something burns. Text is 12 px or larger;
+   every number has tabular figures. */
 :root {
-  --td-ink: #f1e9dc;
+  /* Light text for the dark plates (the old ink); --td-ink below is the ink on vellum. */
+  --td-light: #f1e9dc;
   --td-dim: #b3aba1;
   --td-faint: #7d776f;
   --td-ember: #ff9a4a;
   --td-ember-deep: #e5702c;
-  --td-glass: rgba(12, 15, 21, 0.82);
   --td-glass-edge: rgba(255, 255, 255, 0.1);
   --td-tile: rgba(255, 255, 255, 0.035);
   --td-night: #0b0e14;
-  --td-serif: 'Cormorant Garamond', 'EB Garamond', Garamond, Georgia, 'Times New Roman', serif;
-  --td-ui: 'Barlow Semi Condensed', 'Arial Narrow', 'Roboto Condensed', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --td-serif: var(--td-fell);
+  --td-ui: var(--td-garamond);
+  /* Materials (§4.1). Vellum: fibre and blotch noise (tiles of 1000 px, stitched) under a warm gradient. */
+  --td-vellum-hi: #e3d6b6;
+  --td-vellum: #d9cbaa;
+  --td-vellum-lo: #bfae88;
+  --td-ink: #2a2118;
+  /* The mockup's soft ink (#5a4a38) and rubric (#8a2a1c) read 3.9:1 on vellum-lo; these are the nearest that reach 4.5:1 (C5). */
+  --td-ink-soft: #4e3f2d;
+  --td-rubric: #78241a;
+  --td-oxblood: #7b1f1a;
+  --td-plate: #e3d3b0;
+  --td-iron-mid: #2b2a28;
+  --td-paper-fibre: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='220' height='220'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='3' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 0.35 0 0 0 0 0.27 0 0 0 0 0.16 0 0 0 0.55 0'/%3E%3C/filter%3E%3Crect width='220' height='220' filter='url(%23n)'/%3E%3C/svg%3E");
+  --td-paper-blotch: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='1000' height='1000'%3E%3Cfilter id='b'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.008' numOctaves='3' seed='7' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 0.42 0 0 0 0 0.3 0 0 0 0 0.16 0 0 0 0.9 -0.35'/%3E%3C/filter%3E%3Crect width='1000' height='1000' filter='url(%23b)'/%3E%3C/svg%3E");
+  --td-paper: var(--td-paper-fibre), var(--td-paper-blotch);
+  --td-iron-noise: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='1.4' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 0.7 0 0 0 0 0.66 0 0 0 0 0.6 0 0 0 0.16 0'/%3E%3C/filter%3E%3Crect width='160' height='160' filter='url(%23n)'/%3E%3C/svg%3E");
+  --td-iron: var(--td-iron-noise), linear-gradient(180deg, #3a3835 0%, var(--td-iron-mid) 45%, #1d1c1a 100%);
+  --td-wood-grain: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='800' height='200'%3E%3Cfilter id='w'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.005 0.16' numOctaves='3' seed='3' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 0.55 0 0 0 0 0.42 0 0 0 0 0.3 0 0 0 0.22 0'/%3E%3C/filter%3E%3Crect width='800' height='200' filter='url(%23w)'/%3E%3C/svg%3E");
+  --td-wood: var(--td-wood-grain), linear-gradient(180deg, #3a2d23 0%, #2a2019 60%, #1e1712 100%);
+  --td-fell: 'IM Fell English', Georgia, serif;
+  --td-fell-sc: 'IM Fell English SC', Georgia, serif;
+  --td-garamond: 'EB Garamond', Georgia, serif;
   --td-top: env(safe-area-inset-top, 0px);
   --td-right: env(safe-area-inset-right, 0px);
   --td-bottom: env(safe-area-inset-bottom, 0px);
@@ -26,7 +48,7 @@
   /* Over the vignette and grain (.td-atmos). */
   z-index: 2;
   font-family: var(--td-ui);
-  color: var(--td-ink);
+  color: var(--td-light);
   font-variant-numeric: lining-nums tabular-nums;
   -webkit-font-smoothing: antialiased;
   -webkit-tap-highlight-color: transparent;
@@ -47,16 +69,76 @@
 }
 .td-serif {
   font-family: var(--td-serif);
-  font-weight: 600;
+  font-weight: 400;
 }
 
 .td-glass {
-  background: var(--td-glass);
+  /* Geometry only; the face is .td-iron or .td-vellum. */
   border: 1px solid var(--td-glass-edge);
   border-radius: 18px;
-  backdrop-filter: blur(10px);
-  -webkit-backdrop-filter: blur(10px);
-  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.35);
+}
+
+/* Vellum: a page of paper. */
+.td-vellum {
+  background: var(--td-paper), radial-gradient(140% 120% at 30% 20%, var(--td-vellum-hi) 0%, var(--td-vellum) 45%, var(--td-vellum-lo) 100%);
+  box-shadow: inset 0 0 0 1px rgba(60, 40, 20, 0.25), inset 0 0 18px rgba(90, 60, 25, 0.35);
+  color: var(--td-ink);
+}
+
+/* Iron: a plate, lit from the top left. */
+.td-iron {
+  background: var(--td-iron);
+  box-shadow: inset 0 1px 0 rgba(255, 240, 220, 0.12), inset 0 -1px 0 rgba(0, 0, 0, 0.6), 0 2px 3px rgba(0, 0, 0, 0.6), 0 6px 14px rgba(0, 0, 0, 0.45);
+}
+
+/* Four rivets in the corners of a plate, drawn by the two pseudo-elements (no extra elements). */
+.td-rivets {
+  position: relative;
+}
+.td-rivets::before,
+.td-rivets::after {
+  content: '';
+  position: absolute;
+  left: 5px;
+  right: 5px;
+  height: 7px;
+  pointer-events: none;
+  background:
+    radial-gradient(circle at 35% 30%, #8c877d 0%, #4a4740 45%, #1a1917 100%) left / 7px 7px no-repeat,
+    radial-gradient(circle at 35% 30%, #8c877d 0%, #4a4740 45%, #1a1917 100%) right / 7px 7px no-repeat;
+}
+.td-rivets::before {
+  top: 5px;
+}
+.td-rivets::after {
+  bottom: 5px;
+}
+
+/* A red wax seal for the main action of a page. */
+.td-seal {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 62px;
+  border: 0;
+  background: none;
+  cursor: pointer;
+}
+.td-seal::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(circle at 38% 32%, #c4473a 0%, #962a20 40%, #6c1a14 75%, #4a100c 100%);
+  border-radius: 47% 53% 49% 51% / 55% 45% 55% 45%;
+  box-shadow: inset 0 2px 3px rgba(255, 190, 170, 0.35), inset 0 -3px 5px rgba(0, 0, 0, 0.45), 0 3px 6px rgba(0, 0, 0, 0.5);
+}
+.td-seal > * {
+  position: relative;
+  font-family: var(--td-fell-sc);
+  font-size: 17px;
+  color: #f4ddc8;
+  text-shadow: 0 1px 0 rgba(60, 10, 5, 0.9);
 }
 
 /* Buttons */
@@ -181,7 +263,7 @@
   font-weight: 500;
   font-size: 21px;
   line-height: 1.35;
-  color: var(--td-ink);
+  color: var(--td-light);
 }
 .td-prose.td-quiet {
   font-size: 18px;
@@ -202,7 +284,7 @@
   border-radius: 14px;
   border: 1px solid rgba(255, 255, 255, 0.18);
   background: rgba(255, 255, 255, 0.05);
-  color: var(--td-ink);
+  color: var(--td-light);
   font-family: var(--td-serif);
   font-weight: 600;
   font-size: 26px;
@@ -340,7 +422,7 @@
   border-radius: 999px;
   background: rgba(12, 15, 21, 0.9);
   border: 1px solid rgba(255, 154, 74, 0.55);
-  color: var(--td-ink);
+  color: var(--td-light);
   font-size: 15px;
   font-weight: 600;
   letter-spacing: 0.02em;
@@ -562,7 +644,7 @@
   color: var(--td-dim);
 }
 .td-vitals b {
-  color: var(--td-ink);
+  color: var(--td-light);
   font-weight: 600;
 }
 .td-pack-panel {
@@ -737,4 +819,12 @@
   color: #9effa8;
   font: 12px/1.3 ui-monospace, Menlo, Consolas, monospace;
   pointer-events: none;
+}
+
+/* Reduced motion: nothing slides, fades or glows. */
+@media (prefers-reduced-motion: reduce) {
+  .td-layer * {
+    transition: none !important;
+    animation: none !important;
+  }
 }
