@@ -4,8 +4,8 @@ import { DropCap, Ornament, Page } from './Page.tsx'
 
 export default function ChapterIntro({ act }: { act: (a: GameAction) => void }) {
   return (
-    <main className="td-layer td-book td-over-world">
-      <Page>
+    <main className="td-layer td-book td-book-fit td-over-world">
+      <Page fit>
         <p className="td-over">Book I · The Saltreach</p>
         <h1 className="td-heading">Chapter 1 · The Reach Road</h1>
         <Ornament />

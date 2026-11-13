@@ -3,6 +3,7 @@
 import { useState } from 'react'
 import { campOptions, type NightAction, type RunState } from '../rules/run.ts'
 import type { GameAction } from './useGame.ts'
+import { DropCap } from './Page.tsx'
 
 const TITLE = 'Tend the night'
 const OPTIONS: { id: NightAction; name: string; text: string; gain?: string; later?: boolean }[] = [
@@ -21,8 +22,7 @@ export default function CampSheet({ run, act }: { run: RunState; act: (a: GameAc
     <div className="td-layer td-sheet-back">
       <section className="td-folio td-vellum" aria-labelledby="td-camp-title">
         <h2 id="td-camp-title" className="td-folio-title">
-          <span className="td-cap">{TITLE.charAt(0)}</span>
-          <span>{TITLE.slice(1)}</span>
+          <DropCap text={TITLE} />
         </h2>
         <p className="td-folio-sub">The light goes. Choose what to do before you sleep.</p>
         <div className="td-folio-rule">

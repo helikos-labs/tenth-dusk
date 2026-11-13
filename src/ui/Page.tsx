@@ -13,22 +13,32 @@ export function Ornament() {
   )
 }
 
-/** `small` is the notice size: the page shrinks to its content and sits in the middle of the screen. */
-export function Page({ small, children }: { small?: boolean; children: ReactNode }) {
+/**
+ * `small` is the notice size: the page shrinks to its content and sits in the middle of the screen. `fit` is a chapter
+ * page: full width, but only as tall as its text, in the middle of the screen (its layer is .td-book-fit).
+ */
+export function Page({ small, fit, children }: { small?: boolean; fit?: boolean; children: ReactNode }) {
+  const size = small ? ' td-page-small' : fit ? ' td-page-fit' : ''
   return (
-    <section className={small ? 'td-page td-page-small td-vellum td-fade' : 'td-page td-vellum td-fade'}>
+    <section className={`td-page${size} td-vellum td-fade`}>
       <div className="td-page-frame" aria-hidden="true" />
       {children}
     </section>
   )
 }
 
-/** A heading or line whose first letter is a rubric drop cap; the accessible text stays the whole word. */
+/**
+ * A heading or line whose first letter is a rubric drop cap; the accessible text stays the whole word. The letter is
+ * also in data-cap, so a cap whose arm reaches over the next letters (T, F) can tuck them under it.
+ */
 export function DropCap({ text }: { text: string }) {
+  const first = Array.from(text)[0] ?? ''
   return (
     <>
-      <span className="td-cap">{text.charAt(0)}</span>
-      <span>{text.slice(1)}</span>
+      <span className="td-cap" data-cap={first}>
+        {first}
+      </span>
+      <span>{text.slice(first.length)}</span>
     </>
   )
 }

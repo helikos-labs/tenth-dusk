@@ -4,6 +4,7 @@ import { useState } from 'react'
 import type { GearSlot } from '../data/kit.ts'
 import type { RunState } from '../rules/run.ts'
 import type { GameAction } from './useGame.ts'
+import { DropCap } from './Page.tsx'
 
 const GEAR: { slot: GearSlot; label: string }[] = [
   { slot: 'weapon', label: 'Weapon' },
@@ -22,14 +23,11 @@ const nameOf = (id: string) => NAMES[id] ?? id.charAt(0).toUpperCase() + id.slic
 export default function Pack({ run, act }: { run: RunState; act: (a: GameAction) => void }) {
   const [tab, setTab] = useState<'gear' | 'satchel'>('gear')
   const { hero } = run
-  const initial = Array.from(hero.name)[0] ?? ''
-  const rest = hero.name.slice(initial.length)
   return (
     <div className="td-layer td-pack">
       <section className="td-folio td-vellum" aria-labelledby="td-pack-title">
         <h2 id="td-pack-title" className="td-folio-title">
-          <span className="td-cap">{initial}</span>
-          <span>{rest}</span>
+          <DropCap text={hero.name} />
         </h2>
         <p className="td-folio-sub">The Lampwright</p>
         <div className="td-folio-rule" />

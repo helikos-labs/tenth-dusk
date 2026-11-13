@@ -107,3 +107,19 @@ test('the disabled camp gain keeps 4.5:1 on vellum', () => {
   const c = contrast(token(colour), token('--td-vellum-lo'))
   assert.ok(c >= 4.5, `disabled gain on vellum-lo is ${c.toFixed(2)}`)
 })
+
+test('the name field shows a focus ring of at least 2 px and 3:1 on vellum', () => {
+  const rule = /\.td-field:focus-visible \{([^}]*)\}/.exec(css)?.[1] ?? ''
+  const m = /outline:\s*(\d+(?:\.\d+)?)px solid var\((--td-[a-z-]+)\)/.exec(rule)
+  assert.ok(m, `the field's focus-visible rule draws an outline: ${rule}`)
+  assert.ok(Number(m[1]) >= 2, `the ring is ${m[1]} px`)
+  for (const paper of ['--td-vellum-hi', '--td-vellum-lo']) {
+    const c = contrast(token(m[2]), token(paper))
+    assert.ok(c >= 3, `the ring on ${paper} is ${c.toFixed(2)}`)
+  }
+})
+
+test('buttons take their face from their own class (font: inherit only at class weight)', () => {
+  assert.ok(!/\.td-layer button\s*\{/.test(css), '.td-layer button outweighs .td-close and the like')
+  assert.match(css, /\.td-layer :where\(button\) \{[^}]*font: inherit/)
+})

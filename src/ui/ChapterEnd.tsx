@@ -7,8 +7,8 @@ import { DropCap, Ornament, Page } from './Page.tsx'
 export default function ChapterEnd({ run, act }: { run: RunState; act: (a: GameAction) => void }) {
   const hearth = run.status === 'hearth'
   return (
-    <main className="td-layer td-book td-over-world">
-      <Page>
+    <main className="td-layer td-book td-book-fit td-over-world">
+      <Page fit>
         <p className="td-over">Chapter 1 · The Reach Road</p>
         <Ornament />
         {hearth ? (

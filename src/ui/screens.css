@@ -53,7 +53,8 @@
   -webkit-tap-highlight-color: transparent;
   user-select: none;
 }
-.td-layer button {
+.td-layer :where(button) {
+  /* At class weight, so a button's own class (.td-close, .td-alt, .td-tab…) sets its face. */
   font: inherit;
   color: inherit;
 }
@@ -201,7 +202,23 @@
   gap: 12px;
   padding: 30px 28px 28px;
 }
-.td-book-notice {
+/* A chapter page (intro and end): full width, only as tall as its short text, in the middle of the screen. */
+.td-page.td-page-fit {
+  position: relative;
+  top: auto;
+  bottom: auto;
+  left: auto;
+  right: auto;
+  width: calc(100vw - var(--td-left) - var(--td-right) - 44px);
+  max-height: calc(100dvh - 48px);
+  padding-bottom: 32px;
+}
+.td-page-fit .td-menu {
+  margin-top: 0;
+  padding-top: clamp(20px, 4dvh, 32px);
+}
+.td-book-notice,
+.td-book-fit {
   display: flex;
   align-items: center;
   justify-content: center;
@@ -244,6 +261,7 @@
   font-style: italic;
   font-size: 18px;
   line-height: 1.45;
+  text-wrap: balance;
   color: var(--td-ink-soft);
 }
 .td-menu {
@@ -282,6 +300,7 @@
   font-weight: 400;
   font-size: 32px;
   line-height: 1.08;
+  text-wrap: balance;
   color: var(--td-ink);
 }
 .td-prose {
@@ -290,6 +309,7 @@
   font-family: var(--td-garamond);
   font-size: 19px;
   line-height: 1.4;
+  text-wrap: pretty;
   color: var(--td-ink);
 }
 .td-prose.td-quiet {
@@ -300,9 +320,9 @@
 /* The drop cap: a two-span line, so the text still reads whole. */
 .td-prose .td-cap {
   float: left;
-  margin: 2px 6px 0 0;
+  margin: 4px 4px 0 0;
   font-family: var(--td-fell);
-  font-size: 54px;
+  font-size: 60px;
   line-height: 0.8;
 }
 .td-prose:has(.td-cap) {
@@ -336,6 +356,11 @@
 .td-field:focus {
   border-bottom-color: var(--td-rubric);
   box-shadow: 0 1px 0 var(--td-rubric);
+}
+/* A clear ring round the pen line while it has the keyboard: rubric on vellum, over 3:1. */
+.td-field:focus-visible {
+  outline: 2px solid var(--td-rubric);
+  outline-offset: 2px;
 }
 .td-fade {
   animation: td-fade-in 0.6s ease-out both;
@@ -418,6 +443,9 @@
   min-width: 0;
 }
 .td-chapter-line {
+  /* Into the free tops of the side columns (over the dial's arc and the "Ember" label), so the longest line, "Chapter
+     the Seventh", holds one row at 360 px. */
+  margin: 0 -8px;
   font-family: var(--td-fell-sc);
   font-size: 13px;
   letter-spacing: 0.02em;
@@ -429,6 +457,8 @@
   font-weight: 400;
   font-size: 22px;
   line-height: 1.02;
+  /* Fell's glyph boxes stand taller than this line: room below, so the clamp clips nothing. */
+  padding-bottom: 4px;
   color: var(--td-ink);
   display: -webkit-box;
   -webkit-line-clamp: 2;
@@ -751,6 +781,14 @@
   line-height: 0.8;
   margin-right: 1px;
   color: var(--td-rubric);
+}
+/* A T or an F reaches over the next letters with its arm: they tuck in under it. */
+.td-folio-title .td-cap:is([data-cap='T'], [data-cap='F']) {
+  margin-right: -0.1em;
+}
+/* A W, V or Y opens wide at the top: a little. */
+.td-folio-title .td-cap:is([data-cap='W'], [data-cap='V'], [data-cap='Y']) {
+  margin-right: -0.06em;
 }
 .td-folio-sub {
   margin: 6px 0 0;
