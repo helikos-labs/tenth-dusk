@@ -142,7 +142,7 @@ function tuft(): THREE.BufferGeometry {
 }
 
 /** A clump of reeds: tall thin blades and two cattail heads. */
-function reed(): THREE.BufferGeometry {
+export function reed(): THREE.BufferGeometry {
   const pos: number[] = []
   const col: number[] = []
   const base = C('#55503a')
@@ -170,14 +170,14 @@ function reed(): THREE.BufferGeometry {
     [0.006, 0.004, 0.15],
     [-0.008, -0.005, 0.13],
   ]) {
-    parts.push(paint(new THREE.CylinderGeometry(0.0022, 0.0022, y, 3).translate(x, y / 2, z), C('#4d5f2a')))
+    parts.push(paint(new THREE.CylinderGeometry(0.0022, 0.0022, y, 3).translate(x, y / 2, z), C('#6a6244')))
     parts.push(paint(new THREE.CylinderGeometry(0.0075, 0.0075, 0.032, 6).translate(x, y - 0.012, z), C('#5a3a20')))
   }
   return mergeGeometries(parts.map(strip))!
 }
 
-function stem(): THREE.BufferGeometry {
-  return paint(new THREE.CylinderGeometry(0.0025, 0.003, 0.065, 3).translate(0, 0.0325, 0), C('#3f7a2c'))
+export function stem(): THREE.BufferGeometry {
+  return paint(new THREE.CylinderGeometry(0.0025, 0.003, 0.065, 3).translate(0, 0.0325, 0), C('#6b6450'))
 }
 
 function bloom(): THREE.BufferGeometry {

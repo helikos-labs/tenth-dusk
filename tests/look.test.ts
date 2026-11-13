@@ -4,7 +4,7 @@ import test from 'node:test'
 import { PALETTE } from '../src/world/palette.ts'
 import { FLOWERS, HEATH_FLOWERS } from '../src/world/flora.ts'
 import { buildField } from '../src/world/field.ts'
-import { FLOWER_SHARE, plantsFor } from '../src/world/vegetation.ts'
+import { FLOWER_SHARE, plantsFor, reed, stem } from '../src/world/vegetation.ts'
 import * as THREE from 'three'
 import { VALLEY } from './fixtures/valley.ts'
 
@@ -42,4 +42,17 @@ test('flowers thinned to a third', () => {
   const was = plantsFor(f, VALLEY, 1, 1).flower.count
   assert.ok(was > 0)
   assert.ok(now <= 0.4 * was, `${now} flowers against ${was}`)
+})
+
+test('reed and flower stem vertex colours are not green', () => {
+  for (const [name, g] of [['reed', reed()], ['stem', stem()]] as const) {
+    const a = g.getAttribute('color')
+    assert.ok(a.count > 0, `${name} has vertex colours`)
+    for (let i = 0; i < a.count; i++) {
+      // The attribute holds three's linear working space; read it as sRGB, as the hex reads.
+      const c = new THREE.Color().setRGB(a.getX(i), a.getY(i), a.getZ(i), THREE.LinearSRGBColorSpace)
+      const { r, g: gr, b } = c.getRGB({ r: 0, g: 0, b: 0 }, THREE.SRGBColorSpace)
+      assert.ok(gr - Math.max(r, b) <= 0.02, `${name} vertex ${i} reads green (${c.getHexString(THREE.SRGBColorSpace)})`)
+    }
+  }
 })
