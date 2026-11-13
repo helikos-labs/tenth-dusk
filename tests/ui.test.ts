@@ -2,6 +2,8 @@
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { test } from 'node:test'
+import { dialSweep } from '../src/ui/dial.ts'
+import { roman } from '../src/ui/roman.ts'
 
 const css = readFileSync(new URL('../src/ui/screens.css', import.meta.url), 'utf8')
 const html = readFileSync(new URL('../index.html', import.meta.url), 'utf8')
@@ -61,4 +63,16 @@ test('reduced motion', () => {
   assert.match(m[1], /\.td-layer \*/)
   assert.match(m[1], /transition:\s*none/)
   assert.match(m[1], /animation:\s*none/)
+})
+
+test('roman numerals', () => {
+  for (const [n, r] of [[1, 'I'], [3, 'III'], [4, 'IV'], [9, 'IX'], [10, 'X'], [14, 'XIV'], [39, 'XXXIX']] as const) assert.equal(roman(n), r)
+  for (const n of [0, 40, -1, 1.5]) assert.throws(() => roman(n), n.toString())
+})
+
+test('the dial sweep', () => {
+  assert.equal(dialSweep(1, 10), 1)
+  assert.equal(dialSweep(10, 10), 0.1)
+  assert.equal(dialSweep(11, 10), 0)
+  assert.equal(dialSweep(0, 10), 1)
 })

@@ -310,7 +310,7 @@
   display: flex;
   flex-direction: column;
   justify-content: space-between;
-  padding: calc(var(--td-top) + 10px) calc(var(--td-right) + 10px) calc(var(--td-bottom) + 10px) calc(var(--td-left) + 10px);
+  padding: calc(var(--td-top) + 12px) calc(var(--td-right) + 12px) calc(var(--td-bottom) + 12px) calc(var(--td-left) + 12px);
   pointer-events: none;
 }
 .td-hud-head,
@@ -324,92 +324,163 @@
 }
 .td-top {
   pointer-events: auto;
+  height: 88px;
+  border-radius: 3px;
+}
+.td-face {
+  position: absolute;
+  inset: 9px 14px;
+  z-index: 1;
+  border-radius: 1px;
   display: grid;
-  grid-template-columns: auto 1fr auto;
+  grid-template-columns: 92px 1fr 92px;
   align-items: center;
-  gap: 10px;
-  padding: 8px 14px 10px;
+  padding: 0 10px;
 }
 .td-day {
   display: flex;
+  justify-content: center;
+}
+.td-dial {
+  width: 74px;
+  height: 58px;
+  display: flex;
   flex-direction: column;
-  align-items: flex-start;
+  align-items: center;
 }
-.td-day-text {
-  font-family: var(--td-serif);
-  font-weight: 600;
-  font-size: 28px;
-  line-height: 1;
+.td-dial svg {
+  width: 62px;
+  height: 26px;
+  flex: none;
+}
+.td-dayword {
+  margin-top: 2px;
+  text-align: center;
   white-space: nowrap;
+  font-family: var(--td-fell-sc);
+  font-size: 15px;
+  letter-spacing: 0.02em;
+  color: var(--td-ink);
 }
-.td-day-of {
-  font-size: 18px;
-  color: var(--td-dim);
+.td-dayword b {
+  font-family: var(--td-fell);
+  font-weight: 400;
+  font-size: 21px;
+}
+.td-dayword i {
+  font-family: var(--td-fell);
+  font-style: italic;
+  font-size: 13px;
+  color: var(--td-ink-soft);
 }
 .td-chapter {
   text-align: center;
   min-width: 0;
 }
+.td-chapter-line {
+  font-family: var(--td-fell-sc);
+  font-size: 13px;
+  letter-spacing: 0.04em;
+  color: var(--td-rubric);
+}
 .td-chapter-name {
-  font-family: var(--td-serif);
-  font-weight: 600;
-  font-size: 21px;
-  line-height: 1.05;
-  margin-top: 2px;
+  font-family: var(--td-fell);
+  font-weight: 400;
+  font-size: 22px;
+  line-height: 1.02;
+  color: var(--td-ink);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
 }
 .td-ember {
   display: flex;
   flex-direction: column;
-  align-items: flex-end;
+  align-items: center;
   gap: 5px;
 }
-.td-pips {
-  display: flex;
-  gap: 3px;
+.td-ember-label {
+  font-family: var(--td-fell-sc);
+  font-size: 13px;
+  color: var(--td-ink-soft);
 }
-.td-pip {
+.td-stones {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 4px;
+  padding: 4px 5px;
+  border-radius: 8px;
+  background: linear-gradient(#24221f, #141311);
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.8), 0 1px 0 rgba(255, 240, 220, 0.25);
+}
+.td-stone {
   width: 10px;
-  height: 10px;
-  transform: rotate(45deg);
-  border: 1.5px solid rgba(255, 190, 140, 0.55);
-  border-radius: 1px;
+  height: 13px;
+  border-radius: 50% 50% 46% 46%;
+  background: radial-gradient(circle at 40% 35%, #3a3632, #191715);
+  box-shadow: inset 0 0 2px rgba(0, 0, 0, 0.8);
 }
-.td-pip.td-lit {
-  background: var(--td-ember);
-  border-color: var(--td-ember);
-  box-shadow: 0 0 8px rgba(255, 154, 74, 0.7);
+.td-stone.td-lit {
+  background: radial-gradient(circle at 42% 38%, #fff1c9 0%, #ffb35e 30%, #e0661f 70%, #7a2a0c 100%);
+  box-shadow: 0 0 6px rgba(255, 140, 50, 0.8), 0 0 12px rgba(255, 110, 30, 0.35);
 }
-.td-tracker {
-  pointer-events: auto;
+/* The objectives slip: torn vellum pinned by an iron nail. The nail is outside the clip, in the wrapper. */
+.td-slip-wrap {
+  position: relative;
   align-self: flex-start;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  padding: 9px 14px;
-  border-radius: 14px;
+  margin: 6px 0 0 10px;
+}
+.td-slip {
+  pointer-events: auto;
+  width: 198px;
+  padding: 14px 14px 12px 18px;
+  transform: rotate(-1.2deg);
+  clip-path: polygon(0 3%, 6% 0, 18% 2%, 33% 0, 49% 3%, 63% 1%, 80% 3%, 94% 0, 100% 4%, 99% 30%, 100% 62%, 98% 100%, 82% 97%, 64% 100%, 46% 98%, 29% 100%, 12% 97%, 0 100%, 2% 64%, 0 32%);
+  box-shadow: none;
+}
+.td-nail {
+  position: absolute;
+  left: 12px;
+  top: -6px;
+  width: 11px;
+  height: 11px;
+  border-radius: 50%;
+  z-index: 3;
+  background: radial-gradient(circle at 35% 30%, #a39d92, #4a4740 55%, #151413);
+  box-shadow: 0 2px 2px rgba(0, 0, 0, 0.7);
 }
 .td-goal {
   display: flex;
-  align-items: center;
-  gap: 9px;
+  justify-content: space-between;
+  align-items: baseline;
+  font-family: var(--td-garamond);
   font-size: 16px;
-  font-weight: 500;
+  line-height: 1.5;
+  color: var(--td-ink);
 }
-.td-goal-n {
-  color: var(--td-ember);
-  font-weight: 600;
-  margin-left: 6px;
+.td-tally {
+  font-family: var(--td-fell);
+  font-size: 15px;
+  color: var(--td-rubric);
+  letter-spacing: 0.05em;
 }
-.td-diamond {
-  width: 10px;
-  height: 10px;
-  flex: none;
-  transform: rotate(45deg);
-  border: 1.5px solid var(--td-ember);
-  border-radius: 1px;
+.td-done > span:not(.td-sr):not(.td-tally) {
+  text-decoration: line-through;
+  text-decoration-color: var(--td-rubric);
+  text-decoration-thickness: 1.5px;
+  color: var(--td-ink-soft);
 }
-.td-diamond.td-lit {
-  background: var(--td-ember);
+/* Text for screen readers and the tests, which the plate shows another way. */
+.td-sr {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+  white-space: nowrap;
 }
 .td-chip-slot {
   display: flex;
