@@ -14,7 +14,14 @@
 // wall ring's shade) look-warm-shade.png. Warmth is ΣR ÷ ΣB over a 40 × 40 box. For both, the ground just in front of
 // the beacon must be at least 1.05 × warmer lit than unlit (and gain 2 levels of R − B); in the sun, the beacon's box
 // and that ground box must also be 1.05 × the boxes 4 hexes across on seen land.
-// Run after `npm run build`: node tests/e2e/look.mjs   (Playwright must resolve, as in smoke.mjs)
+// Then every screen (§6.2) at 360 × 640 and 390 × 844, deviceScaleFactor 2, in the Google faces (each must load; the
+// faces loaded are printed): title, name, intro, world HUD, camp, pack and satchel, the restoring notice of a lost WebGL
+// context, both chapter ends and, turned sideways, Upright, saved as look-<screen>-<width>.png, with look-chapter-7-
+// <width>.png, the day plate holding its longest chapter line. On every screen no text overflows its box; on the HUD the
+// top plate, slip and board lie apart and on the screen; with reduced motion the camp folio neither slides nor fades.
+// The overflow and HUD checks run again with the font hosts blocked (the Georgia fallback).
+// Run after `npm run build`: node tests/e2e/look.mjs [screens]   (Playwright must resolve, as in smoke.mjs; `screens`
+// skips the world checks)
 import { spawn } from 'node:child_process'
 import { mkdirSync } from 'node:fs'
 import { createRequire } from 'node:module'
@@ -213,6 +220,218 @@ const boxDiff = (page, first, second, box) =>
     { a: first.toString('base64'), b: second.toString('base64'), box },
   )
 
+/** The two phone sizes every screen is looked at in (§6.2). */
+const SIZES = [
+  { width: 360, height: 640 },
+  { width: 390, height: 844 },
+]
+/** The faces the screens are set in (§4.2), which must have loaded for the pictures. */
+const FACES = ['IM Fell English normal', 'IM Fell English italic', 'IM Fell English SC normal', 'EB Garamond normal', 'EB Garamond italic']
+const FONT_HOSTS = '**/fonts.g*/**'
+const press = (page, name) => page.getByRole('button', { name, exact: true }).click({ timeout: 10_000 })
+const worldReady = (page) => page.waitForFunction(() => window.__worldReady === true, null, { timeout: READY_MS, polling: 250 })
+
+/** Once the fonts asked for so far have loaded and every finite animation has finished (as flow.mjs's shot does). */
+async function settle(page) {
+  await page.evaluate(() => document.fonts.ready)
+  await page
+    .waitForFunction(() => document.getAnimations().every((a) => a.playState !== 'running' || a.effect.getTiming().iterations === Infinity), null, { timeout: 10_000, polling: 100 })
+    .catch(() => {})
+  await page.waitForTimeout(300)
+}
+
+/**
+ * Text that doesn't fit its box, on every element under a .td-layer that holds text of its own and is laid out as a box:
+ * wider than its box (scrollWidth > clientWidth + 1), or, where its overflow is clipped (hidden or clip, a line clamp
+ * included), taller (scrollHeight > clientHeight + 1). The screen-reader-only text (.td-sr, clipped by design) is left out.
+ */
+const overflows = (page) =>
+  page.evaluate(() => {
+    const out = []
+    for (const layer of document.querySelectorAll('.td-layer')) {
+      for (const el of layer.querySelectorAll('*')) {
+        if (el.closest('.td-sr') || el.closest('svg')) continue
+        const own = [...el.childNodes].some((n) => n.nodeType === Node.TEXT_NODE && n.textContent.trim())
+        if (!own) continue
+        const cs = getComputedStyle(el)
+        if (cs.display === 'inline' || cs.display === 'none' || !el.getClientRects().length) continue
+        const name = `${el.tagName.toLowerCase()}${el.className && typeof el.className === 'string' ? `.${el.className.trim().split(/\s+/).join('.')}` : ''} "${el.textContent.trim().slice(0, 40)}"`
+        if (el.scrollWidth > el.clientWidth + 1) out.push(`${name}: ${el.scrollWidth} wide in ${el.clientWidth}`)
+        const clipped = ['hidden', 'clip'].includes(cs.overflowY) || ['hidden', 'clip'].includes(cs.overflowX)
+        if (clipped && el.scrollHeight > el.clientHeight + 1) out.push(`${name}: ${el.scrollHeight} tall in ${el.clientHeight}`)
+      }
+    }
+    return out
+  })
+
+/** The world HUD's top plate, slip and board: no two meet, and each lies on the screen (Review Focus 2). */
+async function hudApart(page, tag) {
+  const { width, height } = page.viewportSize()
+  const boxes = {}
+  for (const part of ['top', 'tracker', 'bottom']) boxes[part] = await page.locator(`[data-hud="${part}"]`).boundingBox()
+  const meet = (a, b) => a.x < b.x + b.width && b.x < a.x + a.width && a.y < b.y + b.height && b.y < a.y + a.height
+  for (const [a, b] of [['top', 'tracker'], ['top', 'bottom'], ['tracker', 'bottom']]) {
+    if (!boxes[a] || !boxes[b]) fail(`${tag}: no HUD ${!boxes[a] ? a : b}`)
+    else if (meet(boxes[a], boxes[b])) fail(`${tag}: the HUD's ${a} and ${b} overlap`)
+  }
+  for (const [part, b] of Object.entries(boxes)) {
+    if (b && (b.x < 0 || b.y < 0 || b.x + b.width > width || b.y + b.height > height)) fail(`${tag}: the HUD's ${part} runs off the screen (${JSON.stringify(b)})`)
+  }
+}
+
+/** The faces document.fonts has loaded, as "Family style". */
+const loadedFaces = (page) =>
+  page.evaluate(async () => {
+    await document.fonts.ready
+    return [...new Set([...document.fonts].filter((f) => f.status === 'loaded').map((f) => `${f.family.replace(/"/g, '')} ${f.style}`))].sort()
+  })
+
+/**
+ * Every screen at one phone size: title, name, chapter intro, world HUD, camp, pack, the restoring notice, both chapter
+ * ends (the save edited, as flow.mjs does: the hero at the hearth for its end, the ember out for the other) and, turned
+ * sideways, the Upright notice. On each: no text overflows (overflows()); on the HUD, its parts apart (hudApart()). With
+ * `fonts`, the Google faces load (and must: FACES), each screen is saved as look-<screen>-<width>.png at
+ * deviceScaleFactor 2, the day plate is checked with the longest chapter line ("Chapter the Seventh") on one row, and
+ * the camp folio with reduced motion has no transition or animation (Review Focus 5). Without, every request to the font
+ * hosts is aborted, so the screens fall back to Georgia (Review Focus 3).
+ */
+async function screens(browser, size, fonts) {
+  const w = size.width
+  const tag = `${w} × ${size.height}${fonts ? '' : ' (fonts blocked)'}`
+  const context = await browser.newContext({ viewport: size, deviceScaleFactor: fonts ? 2 : 1 })
+  context.on('console', (m) => {
+    // Without the fonts, the aborted requests are logged as failed loads.
+    if (m.type() === 'error' && (fonts || !/Failed to load resource/.test(m.text()))) fail(`${tag}: console error: ${m.text()}`)
+  })
+  context.on('weberror', (e) => fail(`${tag}: page error: ${e.error().message}`))
+  let aborted = 0
+  const page = await context.newPage()
+  if (!fonts)
+    await page.route(FONT_HOSTS, (r) => {
+      aborted++
+      return r.abort()
+    })
+  const look = async (name) => {
+    await settle(page)
+    for (const o of await overflows(page)) fail(`${tag}, ${name}: text overflows: ${o}`)
+    if (!fonts) return
+    const path = join(OUT, `look-${name}-${w}.png`)
+    // SwiftShader draws the world slowly at deviceScaleFactor 2: a frame for the picture can take a while.
+    await page.screenshot({ path, timeout: 120_000 })
+    console.log(`saved ${path}`)
+  }
+
+  await page.goto(URL)
+  await page.evaluate(() => localStorage.clear())
+  await page.reload()
+  await look('title')
+  await press(page, 'Start a new journey')
+  // The name field as the player meets it, focused (its focus ring shows).
+  await page.getByRole('textbox').focus()
+  await look('name')
+  await press(page, 'Take up the lantern')
+  await look('intro')
+  await press(page, 'Begin')
+  await worldReady(page)
+  await page.waitForTimeout(1500)
+  await hudApart(page, tag)
+  await look('world')
+
+  if (fonts) {
+    // The day plate's chapter line at its longest ordinal (only chapter 1 exists, so a save can't load chapter 7; the
+    // line is set in place).
+    const line = await page.evaluate(() => {
+      const el = document.querySelector('.td-chapter-line')
+      const was = el.textContent
+      el.textContent = 'Chapter the Seventh'
+      const lh = parseFloat(getComputedStyle(el).lineHeight) || parseFloat(getComputedStyle(el).fontSize) * 1.3
+      const text = document.createRange()
+      text.selectNodeContents(el)
+      const r = { width: Math.ceil(text.getBoundingClientRect().width), room: el.clientWidth, height: el.getBoundingClientRect().height, lh }
+      return { ...r, was }
+    })
+    console.log(`${tag}: "Chapter the Seventh" is ${line.width} px in ${line.room}`)
+    if (line.width > line.room + 1 || line.height > 1.6 * line.lh) fail(`${tag}: "Chapter the Seventh" doesn't fit one row of the day plate (${line.width} in ${line.room}, ${line.height} tall)`)
+    await settle(page)
+    await page.screenshot({ path: join(OUT, `look-chapter-7-${w}.png`), clip: { x: 0, y: 0, width: w, height: 120 }, timeout: 120_000 })
+    console.log(`saved ${join(OUT, `look-chapter-7-${w}.png`)}`)
+    await page.evaluate((was) => (document.querySelector('.td-chapter-line').textContent = was), line.was)
+  }
+
+  await press(page, 'Camp')
+  await page.getByRole('button', { name: /^Rest/ }).click()
+  await look('camp')
+  await press(page, 'Close')
+  if (fonts) {
+    // Reduced motion: the folio comes up without sliding.
+    await page.emulateMedia({ reducedMotion: 'reduce' })
+    await press(page, 'Camp')
+    const motion = await page.evaluate(() => {
+      const cs = getComputedStyle(document.querySelector('.td-folio'))
+      return { transition: cs.transitionDuration, animation: cs.animationName }
+    })
+    if (motion.transition.split(',').some((d) => d.trim() !== '0s')) fail(`${tag}: with reduced motion the camp folio's transition-duration is ${motion.transition}`)
+    if (motion.animation !== 'none') fail(`${tag}: with reduced motion the camp folio still animates (${motion.animation})`)
+    await press(page, 'Close')
+    await page.emulateMedia({ reducedMotion: 'no-preference' })
+  }
+  await press(page, 'Pack')
+  await look('pack')
+  await page.getByRole('tab', { name: /^Satchel/ }).click()
+  await look('satchel')
+  await press(page, 'Close')
+
+  // A lost WebGL context: the notice shows until the world is drawn again.
+  if (!(await page.evaluate(() => window.__loseContext()))) fail(`${tag}: no WEBGL_lose_context to lose the context with`)
+  else {
+    await page.locator('.td-restoring').waitFor({ state: 'visible', timeout: 10_000 })
+    await look('restoring')
+    await worldReady(page)
+  }
+
+  // The chapter ends, from the save edited.
+  for (const [name, status] of [['end', 'hearth'], ['end-expired', 'expired']]) {
+    await page.evaluate(
+      ({ k, status }) => {
+        const f = JSON.parse(localStorage.getItem(k))
+        const hearth = [...window.__run.zone.cells.values()].find((c) => c.landmark === 'hearth')
+        f.run.status = status
+        if (status === 'hearth') {
+          f.run.at = { row: hearth.row, col: hearth.col }
+          const fog = new Map(f.run.fog)
+          for (const c of window.__run.zone.cells.values()) if (Math.abs(c.row - hearth.row) <= 3 && Math.abs(c.col - hearth.col) <= 3) fog.set(`${c.row},${c.col}`, 3)
+          f.run.fog = [...fog]
+        }
+        localStorage.setItem(k, JSON.stringify(f))
+      },
+      { k: SAVE_KEY, status },
+    )
+    await page.reload()
+    await press(page, 'Continue')
+    await worldReady(page)
+    await page.waitForTimeout(1500)
+    await look(name)
+  }
+
+  // Sideways: the Upright notice over everything.
+  await page.setViewportSize({ width: size.height, height: size.width })
+  await page.getByText('Turn your phone upright', { exact: true }).waitFor({ state: 'visible', timeout: 10_000 })
+  await look('upright')
+  await page.setViewportSize(size)
+
+  if (fonts) {
+    const faces = await loadedFaces(page)
+    console.log(`${tag}: fonts loaded: ${faces.join(', ') || 'none'}`)
+    for (const f of FACES) if (!faces.includes(f)) fail(`${tag}: the font ${f} did not load (the pictures fall back to Georgia)`)
+  } else {
+    const faces = await loadedFaces(page)
+    console.log(`${tag}: ${aborted} font requests aborted; fonts loaded: ${faces.join(', ') || 'none'}`)
+    if (!aborted) fail(`${tag}: no request to the font hosts was aborted`)
+    if (faces.length) fail(`${tag}: fonts loaded although their hosts were blocked: ${faces.join(', ')}`)
+  }
+  await context.close()
+}
+
 async function waitForServer(url, ms) {
   const until = Date.now() + ms
   while (Date.now() < until) {
@@ -243,6 +462,22 @@ let browser
 try {
   await waitForServer(`http://localhost:${PORT}/`, 30_000)
   browser = await chromium.launch({ args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist'] })
+  mkdirSync(OUT, { recursive: true })
+  // `node tests/e2e/look.mjs screens` looks at the screens only.
+  if (process.argv[2] !== 'screens') await worldLook(browser)
+  for (const fonts of [true, false]) for (const size of SIZES) await screens(browser, size, fonts)
+} catch (e) {
+  fail(String(e?.stack ?? e))
+} finally {
+  await browser?.close()
+  stop()
+}
+for (const e of errors) console.error(`FAIL ${e}`)
+console.log(errors.length ? 'look: FAIL' : 'look: PASS')
+process.exit(errors.length ? 1 : 0)
+
+/** The world: the bare start, the unseen kept still, a wood up close, and the warmth of lit beacons. */
+async function worldLook(browser) {
   const page = await browser.newPage({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 1 })
   page.on('console', (m) => {
     if (m.type() === 'error') fail(`console error: ${m.text()}`)
@@ -304,12 +539,5 @@ try {
   }
   await warmth(page, 'sun', 'look-warm.png')
   await warmth(page, 'shade', 'look-warm-shade.png')
-} catch (e) {
-  fail(String(e?.stack ?? e))
-} finally {
-  await browser?.close()
-  stop()
+  await page.close()
 }
-for (const e of errors) console.error(`FAIL ${e}`)
-console.log(errors.length ? 'look: FAIL' : 'look: PASS')
-process.exit(errors.length ? 1 : 0)
