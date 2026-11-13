@@ -337,14 +337,11 @@
   outline: none;
   user-select: text;
 }
+/* Focused (and on a phone a tapped field always is), the pen line itself shows it: a heavier rubric line, 3.5 px,
+   over 3:1 on vellum, with no ring to box the field in. */
 .td-field:focus {
   border-bottom-color: var(--td-rubric);
-  box-shadow: 0 1px 0 var(--td-rubric);
-}
-/* A clear ring round the pen line while it has the keyboard: rubric on vellum, over 3:1. */
-.td-field:focus-visible {
-  outline: 2px solid var(--td-rubric);
-  outline-offset: 2px;
+  box-shadow: 0 2px 0 var(--td-rubric);
 }
 .td-fade {
   animation: td-fade-in 0.6s ease-out both;
