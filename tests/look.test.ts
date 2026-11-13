@@ -197,7 +197,8 @@ test('no computed array indices in shaders', async () => {
   const road = new THREE.MeshStandardMaterial()
   materials.fogPatch(road, u, 'test')
   patched('road', road)
-  for (const [name, mat] of [['water', materials.makeWaterMaterial(u)], ['mist', makeMist(u).material as THREE.ShaderMaterial]] as const)
+  const { makeAshMaterial } = await import('../src/world/ashfall.ts')
+  for (const [name, mat] of [['water', materials.makeWaterMaterial(u)], ['mist', makeMist(u).material as THREE.ShaderMaterial], ['ash', makeAshMaterial(u)]] as const)
     sources.push([`${name} vertex`, mat.vertexShader], [`${name} fragment`, mat.fragmentShader])
   assert.ok(sources.length >= 20, `${sources.length} shader sources`)
   for (const [name, src] of sources) assert.deepEqual(computedIndices(src), [], `${name} indexes an array with a computed index (C3)`)
@@ -328,4 +329,49 @@ test('ground and plants warm only where seen (C7)', async () => {
   windPatch(fogOnly, { uTime: { value: 0 }, uState: { value: null } } as never, 0.1, 'test')
   fogOnly.onBeforeCompile(bare, null as never)
   assert.ok(!bare.fragmentShader.includes('td_warm') && !bare.fragmentShader.includes('uLit0'), 'fog-only plants carry no warmth')
+})
+
+// Falling ash (§3.6): 150 flakes in one THREE.Points, hidden over unseen and sunk ground (C7).
+test('ash count', async () => {
+  const { ASH_COUNT, ashGeometry, makeAshFall } = await import('../src/world/ashfall.ts')
+  assert.equal(ASH_COUNT, 150)
+  const g = ashGeometry()
+  assert.equal(g.getAttribute('position').count, ASH_COUNT)
+  assert.equal(g.getAttribute('aFlake').count, ASH_COUNT)
+  const points = makeAshFall({} as never)
+  assert.ok(points.isPoints)
+  assert.equal(points.frustumCulled, false)
+  assert.equal(points.renderOrder, 4)
+})
+
+test('ash respects the fog', async () => {
+  const { makeAshMaterial } = await import('../src/world/ashfall.ts')
+  const vert = makeAshMaterial({} as never).vertexShader
+  assert.ok(vert.includes('td_fogAt('), 'the fog lookup runs per flake')
+  assert.ok(vert.includes('td_seenShare('), 'the seen share gates it')
+  // td_seenShare is 0 until the seen share passes 0.5 (ASH_GLSL, tested above): then the flake has no size and lies
+  // outside the clip volume (a point size under 1 may still draw a pixel).
+  assert.match(vert, /if \(td_seen <= 0\.0\) \{\s*gl_PointSize = 0\.0;\s*gl_Position = vec4\(2\.0, 2\.0, 2\.0, 1\.0\);/)
+})
+
+test('ash stays still for reduced motion', async () => {
+  const { makeAshMaterial } = await import('../src/world/ashfall.ts')
+  const had = Object.getOwnPropertyDescriptor(globalThis, 'matchMedia')
+  const stub = (reduce: boolean) =>
+    Object.defineProperty(globalThis, 'matchMedia', {
+      configurable: true,
+      writable: true,
+      value: (q: string) => ({ matches: reduce && q === '(prefers-reduced-motion: reduce)', media: q }),
+    })
+  try {
+    stub(true)
+    assert.equal(makeAshMaterial({} as never).uniforms.uDrift.value, 0)
+    stub(false)
+    assert.equal(makeAshMaterial({} as never).uniforms.uDrift.value, 1)
+  } finally {
+    if (had) Object.defineProperty(globalThis, 'matchMedia', had)
+    else delete (globalThis as { matchMedia?: unknown }).matchMedia
+  }
+  // No matchMedia at all (node): the ash drifts.
+  assert.equal(makeAshMaterial({} as never).uniforms.uDrift.value, 1)
 })

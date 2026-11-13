@@ -9,7 +9,7 @@ export const PERF = typeof window !== 'undefined' && new URLSearchParams(window.
 export const hooks = (typeof window !== 'undefined' ? window : {}) as unknown as Record<string, unknown>
 
 /**
- * With ?perf=1, `&off=` switches render features off to find a slow phone's bottleneck (aa, shadows, plants, mist, water,
+ * With ?perf=1, `&off=` switches render features off to find a slow phone's bottleneck (aa, shadows, plants, mist, ash, water,
  * and the shader parts in PERF_GLSL: border, blend, grain;
  * comma-separated) and `&dpr=` caps the pixel ratio (0.5 to 2). Without ?perf=1 both are ignored.
  */

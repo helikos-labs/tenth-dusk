@@ -7,10 +7,10 @@
 // hero walks each move the run makes, 0.35 s a hex.
 //
 // Nothing is drawn before its shaders are compiled (materials.ts warmUp): the world shows once every program it draws
-// with (ground, its shadow depth, water, plants and theirs, fog-patched roads, mist, Landmarks lit and remembered, the
-// hero's rim and silhouette, the path) is compiled on stand-ins, so neither the first frame nor the first tap stops to
-// compile. The lantern is the scene's one point light, there from the start, so the programs compiled ahead are the
-// ones drawn.
+// with (ground, its shadow depth, water, plants and theirs, fog-patched roads, mist, falling ash, Landmarks lit and
+// remembered, the hero's rim and silhouette, the path) is compiled on stand-ins, so neither the first frame nor the
+// first tap stops to compile. The lantern is the scene's one point light, there from the start, so the programs
+// compiled ahead are the ones drawn.
 //
 // On phones (SMALL_SCREEN) the scene draws on demand: 30 frames a second while only idle animation runs, every frame
 // while the hero walks, the camera eases or a pinch zooms; the shadows redraw only when something changes.
@@ -49,6 +49,7 @@ import { hexIndex, writeCells } from '../world/terrainMesh.ts'
 import { SMALL_SCREEN, useWorld, useWorldClient } from '../world/useWorld.ts'
 import { litPositions } from '../world/warmth.ts'
 import type { WorldClient } from '../world/worldClient.ts'
+import AshFall from './AshFall.tsx'
 import ContextWatch from './ContextWatch.tsx'
 import { HERO_HEIGHT, dressHero, makeHero } from './models/hero.ts'
 import { dimLandmark, makeLandmark } from './models/landmarks.ts'
@@ -190,6 +191,8 @@ function Scene({ world, client, run, preview, onTap, onReady }: SceneProps) {
       uLit0: { value: lit0 },
       uLit1: { value: lit1 },
       uLit2: { value: lit2 },
+      // The camera's target, which the falling ash's box follows (AshFall.tsx).
+      uFocus: { value: new THREE.Vector3() },
     }
   }, [])
   useLayoutEffect(() => {
@@ -294,6 +297,9 @@ function Scene({ world, client, run, preview, onTap, onReady }: SceneProps) {
     shadows.current = true
   }, [shownKey])
 
+  // The falling ash's Points, compiled ahead with the rest (none with ?perf=1&off=ash).
+  const ash = useRef<THREE.Points>(null)
+
   // Compiling ahead (see the top of this file), a few programs per task, from the task after the mount.
   const [compiled, setCompiled] = useState(false)
   useEffect(() => {
@@ -320,6 +326,7 @@ function Scene({ world, client, run, preview, onTap, onReady }: SceneProps) {
         ...plants.standIns().children,
         ...[...roadMaterials.values()].map((m) => noCast(standIn(m, ['normal']))),
         mist,
+        ...(ash.current ? [ash.current] : []),
         tube,
         // Every model kind as built, and dimmed as remembered (the Landmarks).
         ...modelKeys.map((k) => (k === HERO_KEY ? lightsOff(dressHero(copyModel(k))) : copyModel(k))),
@@ -425,6 +432,7 @@ function Scene({ world, client, run, preview, onTap, onReady }: SceneProps) {
     if (!focus.current) focus.current = target.clone()
     else focus.current.lerp(target, 1 - Math.pow(2, -dt / CAMERA.halfLife))
     follow(camera, scene, focus.current, state.size, zoom.current)
+    uniforms.uFocus.value.copy(focus.current)
     // The first frame with the world in it, then the next: the world has been drawn (R4).
     if (shown && drawn.current < 2 && ++drawn.current === 2) {
       if (TEST) hooks.__worldReady = true
@@ -571,6 +579,7 @@ function Scene({ world, client, run, preview, onTap, onReady }: SceneProps) {
         ))}
         {tube && <mesh geometry={tube} material={materials.tube} />}
         {terrain && <primitive object={mist} visible={!PERF_OFF.has('mist')} dispose={null} />}
+        {!PERF_OFF.has('ash') && <AshFall uniforms={uniforms} ref={ash} />}
       </group>
       <ShadowRefresh need={shadows} />
     </>

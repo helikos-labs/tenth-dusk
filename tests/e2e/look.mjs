@@ -1,6 +1,11 @@
 // Look check (ART-DIRECTION §6): the built app's world at phone size, as a picture to look at. Serves dist/ with
 // `vite preview`, opens ?test=1&seed=REACH1 at 390 × 844 (deviceScaleFactor 1), starts a new journey, waits for
-// window.__worldReady plus 3 s, hides every .td-layer that has no canvas, and saves tests/e2e/out/look-world.png. Then it
+// window.__worldReady plus 3 s, hides every .td-layer that has no canvas, and saves tests/e2e/out/look-world.png, with the
+// vignette and grain (.td-atmos, §3.8), which must never take a tap. No falling ash over the unseen (C7, §3.6): two
+// pictures 600 ms apart differ by a mean under 6 levels over a 120 × 120 box of the unseen mist at the top centre (the
+// mist moves slowly), and in it and in a box of the unseen mist just beyond the seen ground (where the flakes' box
+// reaches) fewer than 20 pixels change by over 40 levels (the mist alone moves a pixel by at most about 35; a flake
+// over it by up to about 95). Then it
 // walks to the nearest reachable wood, zooms in on it and saves look-trees.png, asserting the trees stand out from
 // the ground (mean of the brightest 15% of a 56 × 56 box at least 1.25 × its median luminance). Last, the warmth of lit
 // beacons (§3.7): the save edited (rules/save.ts's format, as flow.mjs's push step does) so one beacon is lit and the
@@ -154,6 +159,60 @@ async function warmth(page, pick, picture) {
   }
 }
 
+/**
+ * Boxes over the unseen mist at the start (REACH1, the hero at 0,4 near the bottom edge): 120 × 120 at the top centre,
+ * and 120 × 120 just beyond the seen ground, where flakes would show if the fog didn't hide them (the flakes' box,
+ * ashfall.ts ASH.box, round the hero doesn't reach the top centre).
+ */
+const UNSEEN_TOP = { x: 135, y: 40, width: 120, height: 120 }
+const UNSEEN_NEAR = { x: 135, y: 300, width: 120, height: 120 }
+
+/**
+ * No falling ash over the unseen (C7): a second picture 600 ms after `first`. Over UNSEEN_TOP the mean absolute
+ * difference per channel must be under 6 levels (the mist moves slowly); over both boxes fewer than 20 pixels may
+ * change by over 40 levels in any channel (measured with the fog's gate on the flakes switched off: about 75 do).
+ */
+async function unseenStill(page, first) {
+  await page.waitForTimeout(600)
+  const second = await page.screenshot()
+  for (const [name, box] of [['top centre', UNSEEN_TOP], ['beyond the seen ground', UNSEEN_NEAR]]) {
+    const d = await boxDiff(page, first, second, box)
+    console.log(`unseen ${name} 600 ms apart: mean |Δ| ${d.mean.toFixed(2)}, ${d.jumps} pixels change by over 40 (rgb ${d.rgb})`)
+    if (box === UNSEEN_TOP && d.mean >= 6) fail(`the unseen ${name} changes by a mean of ${d.mean.toFixed(2)} levels in 600 ms (at most 6)`)
+    if (d.jumps >= 20) fail(`${d.jumps} pixels of the unseen ${name} jump by over 40 levels in 600 ms (falling ash over the unseen?)`)
+  }
+}
+
+/** Over `box` of two PNG screenshots: the mean absolute difference per channel, how many pixels change by over 40 in
+ * any channel, and the first's mean RGB. */
+const boxDiff = (page, first, second, box) =>
+  page.evaluate(
+    async ({ a, b, box }) => {
+      const read = async (data) => {
+        const img = await createImageBitmap(await (await fetch(`data:image/png;base64,${data}`)).blob())
+        const cv = new OffscreenCanvas(box.width, box.height)
+        const ctx = cv.getContext('2d')
+        ctx.drawImage(img, box.x, box.y, box.width, box.height, 0, 0, box.width, box.height)
+        return ctx.getImageData(0, 0, box.width, box.height).data
+      }
+      const [p, q] = [await read(a), await read(b)]
+      let sum = 0
+      let jumps = 0
+      for (let i = 0; i < p.length; i += 4) {
+        let most = 0
+        for (let k = 0; k < 3; k++) {
+          const v = Math.abs(p[i + k] - q[i + k])
+          sum += v
+          most = Math.max(most, v)
+        }
+        if (most > 40) jumps++
+      }
+      const n = p.length / 4
+      return { mean: sum / (3 * n), jumps, rgb: [0, 1, 2].map((k) => Math.round(p.filter((_, i) => i % 4 === k).reduce((s, v) => s + v, 0) / n)) }
+    },
+    { a: first.toString('base64'), b: second.toString('base64'), box },
+  )
+
 async function waitForServer(url, ms) {
   const until = Date.now() + ms
   while (Date.now() < until) {
@@ -197,8 +256,15 @@ try {
   await bareWorld(page)
   await page.waitForTimeout(300)
   mkdirSync(OUT, { recursive: true })
-  await page.screenshot({ path: join(OUT, 'look-world.png') })
+  const first = await page.screenshot({ path: join(OUT, 'look-world.png') })
   console.log(`saved ${join(OUT, 'look-world.png')}`)
+  await unseenStill(page, first)
+  const atmos = await page.evaluate(() => {
+    const el = document.querySelector('.td-atmos')
+    return el && { pointerEvents: getComputedStyle(el).pointerEvents, hidden: el.getAttribute('aria-hidden') }
+  })
+  if (!atmos) fail('no .td-atmos layer over the world')
+  else if (atmos.pointerEvents !== 'none' || atmos.hidden !== 'true') fail(`.td-atmos: pointer-events ${atmos.pointerEvents}, aria-hidden ${atmos.hidden}`)
   // Close shot of a wood: zoom in over the nearest reachable forest hex (the hero stays where it is), and measure.
   const wood = await page.evaluate(() => {
     const at = window.__run.at

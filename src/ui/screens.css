@@ -16,11 +16,15 @@
   --td-right: env(safe-area-inset-right, 0px);
   --td-bottom: env(safe-area-inset-bottom, 0px);
   --td-left: env(safe-area-inset-left, 0px);
+  /* Film grain (§3.8): fractal noise in grey at 9%, a 180 px seamless tile. */
+  --td-grain: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='g'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='180' height='180' filter='url(%23g)' opacity='0.09'/%3E%3C/svg%3E");
 }
 
 .td-layer {
   position: fixed;
   inset: 0;
+  /* Over the vignette and grain (.td-atmos). */
+  z-index: 2;
   font-family: var(--td-ui);
   color: var(--td-ink);
   font-variant-numeric: lining-nums tabular-nums;
@@ -679,6 +683,15 @@
   font-weight: 600;
   letter-spacing: 0.02em;
   animation: td-fade-in 0.4s ease-out both;
+}
+
+/* The vignette and grain (Atmosphere.tsx, §3.8): over the world's canvas, under every .td-layer; static, never hit. */
+.td-atmos {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 1;
+  background: radial-gradient(120% 85% at 50% 58%, transparent 45%, rgba(8, 7, 6, 0.55) 80%, rgba(5, 4, 3, 0.85) 100%), var(--td-grain);
 }
 
 /* Upright: a phone held sideways (wider than tall, under 1000 px wide). */

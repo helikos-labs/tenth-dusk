@@ -1,6 +1,7 @@
 // The game's screens (§16): title → name the hero → chapter intro → the world with its HUD, the camp sheet and the
 // pack over it → chapter end, and the portrait guard over everything. useGame holds the state; the world shows from
-// the chapter intro on (so it builds while the intro is read), keyed by the zone, and stays behind the overlays.
+// the chapter intro on (so it builds while the intro is read), keyed by the zone, and stays behind the overlays, with
+// the vignette and grain (Atmosphere.tsx) over it and under them.
 // ?perf=1 adds the performance overlay (PerfOverlay.tsx).
 //
 // Failures (§15.3, §16, R25): without WebGL 2 the world is never mounted, and a calm notice takes the place of every
@@ -12,6 +13,7 @@ import WorldScene from '../scenes/WorldScene.tsx'
 import { PERF } from '../testHooks.ts'
 import { zoneToWorld } from '../world/adapter.ts'
 import { SMALL_SCREEN, detailFor } from '../world/useWorld.ts'
+import Atmosphere from './Atmosphere.tsx'
 import Calm from './Calm.tsx'
 import CampSheet from './CampSheet.tsx'
 import ChapterEnd from './ChapterEnd.tsx'
@@ -74,6 +76,7 @@ export default function App() {
           onRestored={onRestored}
         />
       )}
+      {showWorld && <Atmosphere />}
       {screen === 'title' && <Title canContinue={canContinue} act={act} />}
       {screen === 'name' && <NameHero act={act} />}
       {screen === 'intro' && <ChapterIntro act={act} />}
