@@ -19,6 +19,8 @@ import { LATTICE } from './terrainMesh.ts'
 
 /** Hex centres keep a clearing this wide for the hero and Landmarks. */
 export const CLEARING = 0.34
+/** The share of today's flowers that still bloom: the land is dying (ART-DIRECTION §3.2). */
+export const FLOWER_SHARE = 1 / 3
 /** Old wood (§15.3): its trees stand this many times as thick as a forest's, and darker. */
 export const OLD_WOOD = { density: 1.6, shade: 0.72 }
 
@@ -115,8 +117,8 @@ function broadleaf(): THREE.BufferGeometry {
 function tuft(): THREE.BufferGeometry {
   const pos: number[] = []
   const col: number[] = []
-  const base = C('#3e6a26')
-  const tip = C('#a9c45e')
+  const base = C('#4a4635')
+  const tip = C('#8f8768')
   for (let i = 0; i < 6; i++) {
     const a = (i / 6) * Math.PI * 2 + i * 0.4
     const lean = 0.018 + (i % 3) * 0.008
@@ -143,8 +145,8 @@ function tuft(): THREE.BufferGeometry {
 function reed(): THREE.BufferGeometry {
   const pos: number[] = []
   const col: number[] = []
-  const base = C('#3f5424')
-  const tip = C('#b3a565')
+  const base = C('#55503a')
+  const tip = C('#9a8f6a')
   for (let i = 0; i < 8; i++) {
     const a = (i / 8) * Math.PI * 2 + i * 0.7
     const lean = 0.008 + (i % 3) * 0.006
@@ -252,7 +254,7 @@ const wetBank = (pr: Probe) => pr.lake < 0.07 || pr.coast < 0.14
  * One province's plants: its terrain from `field`, and a clearing round a Landmark on `cell`. Seeded by
  * the hex and reading the field only inside the province, so they change only when the ground there changes.
  */
-export function placeProvince(field: Field, cell: WorldCell, detail = 1): PlantLists {
+export function placeProvince(field: Field, cell: WorldCell, detail = 1, flowerShare = FLOWER_SHARE): PlantLists {
   const out = emptyLists()
   const c = hexCenter(cell.q, cell.r)
   const rand = rng(cell.q, cell.r, 1)
@@ -328,7 +330,7 @@ export function placeProvince(field: Field, cell: WorldCell, detail = 1): PlantL
       if (!cc) continue
       const kind = k === clumps - 1 ? second : main
       k++
-      const count = Math.round((16 + rand() * 10) * detail)
+      const count = Math.round((16 + rand() * 10) * detail * flowerShare)
       for (let i = 0; i < count; i++) {
         const a = rand() * Math.PI * 2
         const d = Math.abs(rand() + rand() - 1) * 0.2
@@ -481,8 +483,8 @@ export function joinPlants(parts: PlantLists[]): PlantSets {
 }
 
 /** Every province's plants and the islets', placed at once on this thread (what the world worker does). */
-export function plantsFor(field: Field, board: Record<string, WorldCell>, detail = 1): PlantSets {
-  return joinPlants([...readingOrder(board).map((c) => placeProvince(field, c, detail)), placeIslets(field)])
+export function plantsFor(field: Field, board: Record<string, WorldCell>, detail = 1, flowerShare = FLOWER_SHARE): PlantSets {
+  return joinPlants([...readingOrder(board).map((c) => placeProvince(field, c, detail, flowerShare)), placeIslets(field)])
 }
 
 // ---------------------------------------------------------------- instanced meshes (main thread)
