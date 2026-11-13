@@ -21,11 +21,11 @@ import { LATTICE } from './terrainMesh.ts'
 export const CLEARING = 0.34
 /** The share of today's flowers that still bloom: the land is dying (ART-DIRECTION §3.2). */
 export const FLOWER_SHARE = 1 / 3
-/** Old wood (§15.3): its trees stand this many times as thick as a forest's, and darker. */
 /** Share of broadleaves that keep a clump of dead leaves (the rest are bare), and of pines that lost their crown. */
 export const LEAFY_SHARE = 0.3
 export const SNAPPED_SHARE = 0.25
-export const OLD_WOOD = { density: 1.6, shade: 0.72 }
+/** Old wood (§15.3): its trees stand this many times as thick as a forest's, and darker. */
+export const OLD_WOOD = { density: 1.6, shade: 0.85 }
 
 /** mulberry32 seeded from a hex. */
 function rng(q: number, r: number, salt: number) {
@@ -270,6 +270,8 @@ function putTree(lists: PlantLists, kind: 'conifer' | 'oak', p: Placement, rand:
 }
 
 const tint = (rand: () => number, spread: number) => new THREE.Color(1, 1, 1).multiplyScalar(1 - spread / 2 + rand() * spread)
+/** A tree's tint: dead wood is pale, so it dims by at most 8%. */
+const treeTint = (rand: () => number) => tint(rand, 0.08)
 /** How much meadow a point is (the colour blend's grass weight, so grass thins out where the ground turns). */
 const meadow = (pr: Probe, x: number, z: number) => smoothstep(-0.12, 0.12, pr.sd.grassland + fray('grassland', x, z))
 /** Wet banks and beaches stay clear of grass and trees. */
@@ -313,7 +315,7 @@ export function placeProvince(field: Field, cell: WorldCell, detail = 1, flowerS
       // Ragged edges: the wood thins out towards its border.
       if (pr.sd.forest + fray('forest', s.x, s.z) < 0.28 * rand() || wetBank(pr) || pr.height < WATER_LEVEL + 0.01) continue
       placed.push(s.p)
-      const color = tint(rand, 0.32)
+      const color = treeTint(rand)
       if (cell.dense) color.multiplyScalar(OLD_WOOD.shade)
       const item = { x: s.x, y: pr.height - 0.004, z: s.z, s: 0.82 + rand() * 0.45, rot: rand() * Math.PI * 2, color }
       putTree(out, rand() < pine ? 'conifer' : 'oak', item, rand)
@@ -344,7 +346,7 @@ export function placeProvince(field: Field, cell: WorldCell, detail = 1, flowerS
       const fringe = pr.sd.forest > -0.45 ? Math.pow(1 + pr.sd.forest / 0.45, 1.6) * 0.55 : 0
       if (rand() > Math.max(fringe, 0.012)) continue
       const bush = rand() < 0.5
-      const item = { x: s.x, y: pr.height - 0.004, z: s.z, s: bush ? 0.32 + rand() * 0.18 : 0.55 + rand() * 0.3, rot: rand() * Math.PI * 2, color: tint(rand, 0.3) }
+      const item = { x: s.x, y: pr.height - 0.004, z: s.z, s: bush ? 0.32 + rand() * 0.18 : 0.55 + rand() * 0.3, rot: rand() * Math.PI * 2, color: treeTint(rand) }
       putTree(out, bush || rand() < 0.45 ? 'oak' : 'conifer', item, rand)
     }
     // Flowers grow in clumps: a main kind and a second kind per field.
@@ -395,7 +397,7 @@ export function placeProvince(field: Field, cell: WorldCell, detail = 1, flowerS
       const y = pr.height - 0.004
       if (rand() < 0.42) put(out, 'rock', { x: s.x, y: y - 0.01, z: s.z, s: 0.7 + rand() * 0.9, rot: rand() * Math.PI * 2, tilt: (rand() - 0.5) * 0.5 })
       // Hardy pines on the lower slopes (measured from the terrace the range stands on).
-      else if (y - pr.terrace < 0.34 && y > WATER_LEVEL + 0.02 && rand() < 0.5) putTree(out, 'conifer', { x: s.x, y, z: s.z, s: 0.55 + rand() * 0.3, rot: rand() * 6.28, color: tint(rand, 0.25) }, rand)
+      else if (y - pr.terrace < 0.34 && y > WATER_LEVEL + 0.02 && rand() < 0.5) putTree(out, 'conifer', { x: s.x, y, z: s.z, s: 0.55 + rand() * 0.3, rot: rand() * 6.28, color: treeTint(rand) }, rand)
     }
   } else if (cell.terrain !== 'water') {
     // Boulders fan out round a range's foot.
@@ -470,7 +472,7 @@ export function placeIslets(field: Field): PlantLists {
     if (above > 0.03) {
       const r = rand()
       if (r < 0.1) put(out, 'rock', { x: p.x, y: pr.height - 0.012, z: p.z, s: 0.5 + rand() * 0.9, rot: rand() * 6.28, tilt: (rand() - 0.5) * 0.6 })
-      else if (r < 0.15 && above > 0.06) putTree(out, 'conifer', { x: p.x, y: pr.height - 0.004, z: p.z, s: 0.5 + rand() * 0.3, rot: rand() * 6.28, tilt: 0.12, color: tint(rand, 0.25) }, rand)
+      else if (r < 0.15 && above > 0.06) putTree(out, 'conifer', { x: p.x, y: pr.height - 0.004, z: p.z, s: 0.5 + rand() * 0.3, rot: rand() * 6.28, tilt: 0.12, color: treeTint(rand) }, rand)
       else if (r < 0.3) put(out, 'tuft', { x: p.x, y: pr.height - 0.004, z: p.z, s: 0.7 + rand() * 0.5, rot: rand() * 6.28, color: tint(rand, 0.3).multiplyScalar(0.9) })
     } else if (above > -0.1 && pr.cliff > 0.5 && pr.sd.sea < 0.35 && rand() < 0.05) {
       put(out, 'rock', { x: p.x, y: pr.height + 0.01, z: p.z, s: 0.6 + rand() * 0.8, rot: rand() * 6.28, tilt: (rand() - 0.5) * 0.6 })
