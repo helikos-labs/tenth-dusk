@@ -119,6 +119,23 @@ test('the name field shows a focus ring of at least 2 px and 3:1 on vellum', () 
   }
 })
 
+test('ember orange stays off focus rings and the book backdrop; the rings reach 3:1', () => {
+  for (const m of css.matchAll(/([^{}]*:focus(?:-visible)?[^{}]*)\{([^}]*)\}/g)) {
+    assert.ok(!/--td-ember|255,\s*1[0-9]{2},\s*[0-9]{1,2}\)/.test(m[2]), `${m[1].trim()} uses ember`)
+  }
+  const book = /\.td-book \{([^}]*)\}/.exec(css)?.[1] ?? ''
+  assert.ok(!/radial-gradient|--td-ember|255,\s*140/.test(book), `the book backdrop glows: ${book}`)
+  const plate = /\.td-tool:focus-visible \{[^}]*outline:\s*2px solid var\((--td-[a-z-]+)\)/.exec(css)?.[1]
+  assert.ok(plate, 'the iron plates have a focus ring of a token colour')
+  // On the plate's iron and the wood board round it (its darkest and lightest stops).
+  for (const ground of [token('--td-iron-mid'), '#3a2d23', '#1e1712']) {
+    const c = contrast(token(plate), ground)
+    assert.ok(c >= 3, `the plate ring on ${ground} is ${c.toFixed(2)}`)
+  }
+  const folio = /\.td-close:focus-visible \{[^}]*outline:\s*2px solid var\((--td-[a-z-]+)\)/.exec(css)?.[1]
+  assert.equal(folio, '--td-rubric')
+})
+
 test('the ember tray keeps one row: 6 to 9 stones fit its 92 px column', () => {
   const column = Number(/\.td-face \{[^}]*grid-template-columns:\s*(\d+)px 1fr \1px/.exec(css)?.[1])
   const tray = /\.td-stones \{([^}]*)\}/.exec(css)?.[1] ?? ''

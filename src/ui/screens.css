@@ -137,22 +137,22 @@
   text-shadow: 0 1px 0 rgba(60, 10, 5, 0.9);
 }
 
-/* Focus */
-.td-tool:focus-visible,
+/* Focus: pale ink round an iron plate on the wood, rubric on vellum (both over 3:1; ember is only for what burns). */
+.td-tool:focus-visible {
+  outline: 2px solid var(--td-plate);
+  outline-offset: 2px;
+}
 .td-entry:focus-visible,
 .td-tab:focus-visible,
 .td-close:focus-visible {
-  outline: 2px solid var(--td-ember);
+  outline: 2px solid var(--td-rubric);
   outline-offset: 2px;
-}
-.td-folio :focus-visible {
-  outline-color: var(--td-rubric);
 }
 
 /* The book pages (§4.3): title, naming, chapter intro and end, and the notices. A vellum leaf with a double rubric rule
    frame, inset 22 px at the sides and 92 px above and below (less on a short screen, so it fits). */
 .td-book {
-  background: radial-gradient(120% 60% at 50% 30%, rgba(255, 140, 60, 0.12), transparent 60%), linear-gradient(180deg, #121722 0%, #0b0e14 70%);
+  background: linear-gradient(180deg, #121722 0%, #0b0e14 70%);
 }
 .td-book.td-over-world {
   background: rgba(6, 5, 4, 0.35);
