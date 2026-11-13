@@ -6,6 +6,7 @@ import { useMemo } from 'react'
 import { LAST_DAY, NIGHT_STEPS, STEPS_PER_DAY, type RunState } from '../rules/run.ts'
 import type { Off } from '../rules/hex.ts'
 import DayDial from './DayDial.tsx'
+import { Icon, type IconName } from './Icons.tsx'
 import { roman } from './roman.ts'
 import { canPressOn, type GameAction } from './useGame.ts'
 
@@ -20,15 +21,46 @@ interface HudProps {
   act: (a: GameAction) => void
 }
 
-const ICON = {
-  fill: 'none',
-  stroke: 'currentColor',
-  strokeWidth: 1.6,
-  strokeLinecap: 'round',
-  strokeLinejoin: 'round',
-} as const
-
 const ORDINALS = ['First', 'Second', 'Third', 'Fourth', 'Fifth', 'Sixth', 'Seventh', 'Eighth', 'Ninth', 'Tenth']
+/** An event notice's line split on " · ": the lead in rubric, the rest in ink.  */
+const noteLines = (line: string) => {
+  const at = line.indexOf(' · ')
+  if (at < 0) return line
+  return (
+    <>
+      <b>{line.slice(0, at)}</b>
+      {line.slice(at)}
+    </>
+  )
+}
+
+/** One iron plate of the bottom board: an icon over a Fell small-caps label. */
+function Plate({
+  icon,
+  label,
+  hot,
+  disabled,
+  onClick,
+}: {
+  icon: IconName
+  label: string
+  hot?: boolean
+  disabled?: boolean
+  onClick?: () => void
+}) {
+  return (
+    <button
+      type="button"
+      className={hot ? 'td-tool td-iron td-rivets td-ready' : 'td-tool td-iron td-rivets'}
+      disabled={disabled}
+      onClick={onClick}
+    >
+      <Icon name={icon} size={26} />
+      <span className="td-tool-label">{label}</span>
+    </button>
+  )
+}
+
 /** "Chapter the Third" from a zone's chapter id ("b1c3"). */
 const chapterLine = (id: string): string => {
   const n = Number(/c(\d+)$/.exec(id)?.[1] ?? 1)
@@ -89,28 +121,29 @@ export default function Hud({ run, preview, walking, blocked, blockedN, notice, 
       <div className="td-hud-foot">
         <div className="td-chip-slot" aria-live="polite">
           {blocked ? (
-            <span key={`blocked-${blockedN}`} className="td-chip">
+            <span key={`blocked-${blockedN}`} className="td-chip td-vellum">
               {blocked}
             </span>
           ) : (
             notice && (
-              <span key={`notice-${noticeN}`} className="td-chip td-notice">
-                {notice}
+              <span key={`notice-${noticeN}`} className="td-chip td-vellum td-notice">
+                {noteLines(notice)}
               </span>
             )
           )}
         </div>
-        <footer className="td-bottom td-iron td-glass" data-hud="bottom">
+        <footer className="td-bottom td-board" data-hud="bottom">
           <div className="td-gauges">
             <div>
               <div className="td-gauge-head">
                 <span className="td-label">Vigour</span>
                 <span className="td-gauge-value">
-                  {run.hero.vigour} / {run.hero.maxVigour}
+                  {run.hero.vigour}
+                  <small> / {run.hero.maxVigour}</small>
                 </span>
               </div>
-              <div className="td-bar">
-                <span
+              <div className="td-groove">
+                <i
                   style={{
                     width: `${(100 * Math.max(0, run.hero.vigour)) / run.hero.maxVigour}%`,
                   }}
@@ -121,50 +154,34 @@ export default function Hud({ run, preview, walking, blocked, blockedN, notice, 
               <div className="td-gauge-head">
                 <span className="td-label">Steps</span>
                 <span className="td-gauge-value">
-                  {run.night ? `Night ${run.nightSteps}` : `${run.steps} / ${STEPS_PER_DAY}`}
+                  {run.night ? (
+                    `Night ${run.nightSteps}`
+                  ) : (
+                    <>
+                      {run.steps}
+                      <small> / {STEPS_PER_DAY}</small>
+                    </>
+                  )}
                 </span>
               </div>
-              <div className={run.night ? 'td-segs td-night' : 'td-segs'}>
+              <div className={run.night ? 'td-notches td-night' : 'td-notches'}>
                 {Array.from({ length: segs }, (_, i) => (
-                  <span key={i} className={i < left ? 'td-lit' : undefined} />
+                  <i key={i} className={i < left ? 'td-lit' : undefined} />
                 ))}
               </div>
             </div>
           </div>
           <nav className="td-tools">
-            <button
-              type="button"
-              className={end || night ? 'td-tool td-ready' : 'td-tool'}
+            <Plate
+              icon="boot"
+              label={night ? 'Press on' : 'Move'}
+              hot={!!(end || night)}
               disabled={walking || (!end && !night)}
               onClick={() => (end ? act({ t: 'tap', at: end }) : act({ t: 'pressOn' }))}
-            >
-              <svg viewBox="0 0 24 24" {...ICON} aria-hidden="true">
-                <path d="M12 2.8l7.8 4.5v9.4L12 21.2l-7.8-4.5V7.3z" />
-                <path d="M12 16V8.5M8.8 11.5L12 8.3l3.2 3.2" />
-              </svg>
-              {night ? 'Press on' : 'Move'}
-            </button>
-            <button type="button" className="td-tool" disabled={walking} onClick={() => act({ t: 'openCamp' })}>
-              <svg viewBox="0 0 24 24" {...ICON} aria-hidden="true">
-                <path d="M12 4L3 20h18z" />
-                <path d="M12 4v0M9 20l3-6 3 6" />
-              </svg>
-              Camp
-            </button>
-            <button type="button" className="td-tool" disabled={walking} onClick={() => act({ t: 'pack' })}>
-              <svg viewBox="0 0 24 24" {...ICON} aria-hidden="true">
-                <rect x="4" y="8" width="16" height="12" rx="2.5" />
-                <path d="M9 8V6.5A1.5 1.5 0 0 1 10.5 5h3A1.5 1.5 0 0 1 15 6.5V8M4 13h16" />
-              </svg>
-              Pack
-            </button>
-            <button type="button" className="td-tool" disabled>
-              <svg viewBox="0 0 24 24" {...ICON} aria-hidden="true">
-                <path d="M6 3h8l4 4v14H6z" />
-                <path d="M14 3v4h4M9 12h6M9 16h6" />
-              </svg>
-              Journal
-            </button>
+            />
+            <Plate icon="tent" label="Camp" disabled={walking} onClick={() => act({ t: 'openCamp' })} />
+            <Plate icon="satchel" label="Pack" disabled={walking} onClick={() => act({ t: 'pack' })} />
+            <Plate icon="book" label="Journal" disabled />
           </nav>
         </footer>
       </div>
