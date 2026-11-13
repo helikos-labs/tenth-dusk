@@ -485,6 +485,30 @@ ${RR_DIRS_ALL.map((d, i) => `  if (P.${RR_DN[i]} < h) td_add(f, td_fogOf(P.hex +
 }
 `
 
+/** Ash drifts and the low haze on seen ground (ART-DIRECTION §3.3): their colours. */
+export const ASH_LOOK = { ASH: new THREE.Color('#9a958a'), HAZE: new THREE.Color('#3b3a36') }
+
+/**
+ * Ash drifts and low haze (§3.3), driven by the cloud shade's noise (`rr_cloud`, no new noise call), and only on seen
+ * ground (C7). `cloud` is rr_cloud's value over its range (0 to 1). Needs FOG_TINT_GLSL.
+ */
+export const ASH_GLSL = /* glsl */ `
+// The pale ash blend (0 to 0.35) where the cloud noise runs high.
+float td_ash(float cloud) {
+  return 0.35 * smoothstep(0.05, 0.5, cloud);
+}
+// Colour c at world point wpos under the low haze: thickest on low ground, drifting with the cloud noise, scaled by
+// seen (td_seenShare).
+vec3 td_haze(vec3 c, vec3 wpos, float seen, float cloud) {
+  return mix(c, ${glsl(ASH_LOOK.HAZE)}, 0.18 * (1.0 - smoothstep(0.0, 1.2, wpos.y)) * (0.6 + 0.4 * cloud) * seen);
+}
+// How far ash and haze show at fog f: none until its seen share (remembered and in sight) passes 0.5, so nothing of
+// unseen or sunk ground shows (C7), then fading in with it.
+float td_seenShare(TDFog f) {
+  return smoothstep(0.5, 1.0, (f.w.z + f.w.w) / td_sum(f));
+}
+`
+
 /** The fog's uniform declarations, for a shader that reads it. */
 export const FOG_UNIFORMS_GLSL = /* glsl */ `
 uniform sampler2D uState;
@@ -592,6 +616,7 @@ ${CLOUD_GLSL}
 ${WARP_GLSL}
 ${FOG_TINT_GLSL}
 ${FOG_LOOKUP_GLSL}
+${ASH_GLSL}
 vec4 rr_state(float slot, float texel) {
   if (slot < 0.0) return vec4(0.0);
   return texture2D(uState, vec2((slot * ${TEXELS}.0 + texel + 0.5) / uStateSize, 0.5));
@@ -624,12 +649,20 @@ float rr_lum = dot(diffuseColor.rgb, vec3(0.2126, 0.7152, 0.0722));
 diffuseColor.rgb *= 1.0 - rr_ink * mix(0.24, 0.14, smoothstep(0.15, 0.6, rr_lum));
 // A target province takes a faint wash of the hint, inside its whole outline.
 if (rr_s0.r > 0.5) diffuseColor.rgb = mix(diffuseColor.rgb, uHint, 0.12 * (1.0 - smoothstep(0.0, 0.5, rr_rim)));
+// The cloud shade (0 to 0.2), computed once: it darkens the ground and drives the ash and the haze. 0 with ?perf=1's
+// grain off.
+float rr_cl = 0.0;
 #ifndef TD_OFF_GRAIN
-diffuseColor.rgb *= 1.0 - rr_cloud(vWPos.xz, uTime);
+rr_cl = rr_cloud(vWPos.xz, uTime);
 #endif
+diffuseColor.rgb *= 1.0 - rr_cl;
+float td_cl = rr_cl * 5.0;
 // Fog of war (§15.4): the province's state from texel 2, blended with its neighbours' across the warped border. The
 // unseen share is tinted after lighting (opaque_fragment).
 TDFog rr_fog = td_fogAt(rr_prov);
+// Ash drifts on seen land (the sea floor is no province, so never seen; not on a lake's bed), before lighting.
+float td_seen = td_seenShare(rr_fog);
+diffuseColor.rgb = mix(diffuseColor.rgb, ${glsl(ASH_LOOK.ASH)}, td_ash(td_cl) * td_seen * (1.0 - rr_prov.lake));
 diffuseColor.rgb = td_tintSeen(diffuseColor.rgb, rr_fog, vWPos.xz);`,
       )
       .replace(
@@ -687,10 +720,12 @@ if (rr_state(rr_prov.slot, 2.0).b > 0.5) {
         '#include <opaque_fragment>',
         `#include <opaque_fragment>
 // The unseen share after lighting: flat fog, not shaded by the sun.
-gl_FragColor.rgb = mix(gl_FragColor.rgb, td_unseen(rr_fog.w.x > 0.0 ? td_mistNoise(vWPos.xz, uTime) : 0.0), rr_fog.w.x / td_sum(rr_fog));`,
+gl_FragColor.rgb = mix(gl_FragColor.rgb, td_unseen(rr_fog.w.x > 0.0 ? td_mistNoise(vWPos.xz, uTime) : 0.0), rr_fog.w.x / td_sum(rr_fog));
+// The low haze, on seen ground only (C7).
+gl_FragColor.rgb = td_haze(gl_FragColor.rgb, vWPos, td_seen, td_cl);`,
       )
   }
-  mat.customProgramCacheKey = () => 'td-terrain-fog-3'
+  mat.customProgramCacheKey = () => 'td-terrain-fog-4'
   return mat
 }
 

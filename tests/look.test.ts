@@ -150,6 +150,75 @@ test('grade keeps the blacks, drains saturation, leaves grey near grey', () => {
   for (const v of grey) assert.ok(Math.abs(v - 0.5) < 0.05, `grey ${grey}`)
 })
 
+/**
+ * A computed index into an array (C3): `[`, then anything but a plain integer, then `]`. `vec2[6](`, `RR_DIRS[6]` and
+ * `instanceMatrix[3]` pass; `x[i]`, `x[ i ]`, `dirs[(i + 5) % 6]` and `x[0 + i]` do not. Comments are stripped first.
+ */
+const COMPUTED_INDEX = /\[(?!\s*\d+\s*\])\s*[^\]\s][^\]]*\]/g
+const computedIndices = (glsl: string) =>
+  glsl
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .replace(/\/\/.*$/gm, '')
+    .match(COMPUTED_INDEX) ?? []
+
+test('the computed-index check catches what it should', () => {
+  for (const bad of ['x[i]', 'x[ i ]', 'vec2 d = dirs[(i + 5) % 6];', 'x[0 + i]']) assert.ok(computedIndices(bad).length > 0, bad)
+  for (const ok of ['const vec2 RR_DIRS[6] = vec2[6](vec2(1.0), vec2(0.0));', 'vec3 b = instanceMatrix[3].xyz;', 'float[]( 1.0 )', '// x[i]'])
+    assert.deepEqual(computedIndices(ok), [], ok)
+})
+
+test('no computed array indices in shaders', async () => {
+  const materials = await import('../src/world/materials.ts')
+  const grade = await import('../src/world/grade.ts')
+  const { makeMist } = await import('../src/world/mist.ts')
+  const sources: [string, string][] = []
+  for (const [file, mod] of [['materials', materials], ['grade', grade]] as const)
+    for (const [k, v] of Object.entries(mod)) if (k.endsWith('_GLSL') && typeof v === 'string') sources.push([`${file}.${k}`, v])
+  // The patched materials' shader text, as their onBeforeCompile writes it into three's chunks (only the include
+  // lines stand in for three's own code).
+  const chunks = ['common', 'beginnormal_vertex', 'begin_vertex', 'worldpos_vertex', 'color_fragment', 'normal_fragment_maps', 'emissivemap_fragment', 'opaque_fragment']
+  const stub = chunks.map((c) => `#include <${c}>`).join('\n')
+  const u = { uTime: { value: 0 }, uState: { value: null } } as never
+  const patched = (name: string, mat: THREE.Material) => {
+    const shader = { uniforms: {}, vertexShader: stub, fragmentShader: stub } as unknown as THREE.WebGLProgramParametersWithUniforms
+    mat.onBeforeCompile(shader, null as never)
+    sources.push([`${name} vertex`, shader.vertexShader], [`${name} fragment`, shader.fragmentShader])
+  }
+  patched('terrain', materials.makeTerrainMaterial(u))
+  patched('terrain depth', materials.makeTerrainDepthMaterial(u))
+  const plants = materials.plantDepthMaterials(u)
+  patched('plant depth', plants.instanced)
+  const wind = new THREE.MeshStandardMaterial()
+  materials.windPatch(wind, u, 0.1, 'test')
+  patched('plants', wind)
+  const road = new THREE.MeshStandardMaterial()
+  materials.fogPatch(road, u, 'test')
+  patched('road', road)
+  for (const [name, mat] of [['water', materials.makeWaterMaterial(u)], ['mist', makeMist(u).material as THREE.ShaderMaterial]] as const)
+    sources.push([`${name} vertex`, mat.vertexShader], [`${name} fragment`, mat.fragmentShader])
+  assert.ok(sources.length >= 20, `${sources.length} shader sources`)
+  for (const [name, src] of sources) assert.deepEqual(computedIndices(src), [], `${name} indexes an array with a computed index (C3)`)
+})
+
+test('ash and haze reuse the cloud noise, on seen ground only', async () => {
+  const { ASH_GLSL, makeTerrainMaterial } = await import('../src/world/materials.ts')
+  assert.match(ASH_GLSL, /float td_ash\(float cloud\)/)
+  assert.match(ASH_GLSL, /vec3 td_haze\(vec3 c, vec3 wpos, float seen, float cloud\)/)
+  assert.ok(!ASH_GLSL.includes('rr_snoise'), 'ash draws its own noise')
+  // C7: the seen share (remembered and in sight) must pass 0.5 before ash or haze show.
+  assert.match(ASH_GLSL, /smoothstep\(0\.5, 1\.0, \(f\.w\.z \+ f\.w\.w\) \/ td_sum\(f\)\)/)
+  const stub = ['common', 'color_fragment', 'normal_fragment_maps', 'emissivemap_fragment', 'opaque_fragment'].map((c) => `#include <${c}>`).join('\n')
+  const shader = { uniforms: {}, vertexShader: '', fragmentShader: stub } as unknown as THREE.WebGLProgramParametersWithUniforms
+  makeTerrainMaterial({} as never).onBeforeCompile(shader, null as never)
+  const frag = shader.fragmentShader
+  assert.equal(frag.split('rr_cloud(').length - 1, 2, 'rr_cloud: its definition and one call')
+  assert.match(frag, /td_ash\(td_cl\) \* td_seen/)
+  assert.match(frag, /td_haze\(gl_FragColor\.rgb, vWPos, td_seen, td_cl\)/)
+  // ?perf=1's grain switch skips the cloud, not the ash and haze: they read 0 for it.
+  const grain = frag.slice(frag.indexOf('#ifndef TD_OFF_GRAIN'), frag.indexOf('#endif', frag.indexOf('#ifndef TD_OFF_GRAIN')))
+  assert.ok(grain.includes('rr_cl = rr_cloud(') && !grain.includes('float rr_cl') && !grain.includes('td_ash'), grain)
+})
+
 test('the Hush colour has one source', async () => {
   const { readFileSync } = await import('node:fs')
   const { DUSK, FOG_LOOK } = await import('../src/world/materials.ts')
