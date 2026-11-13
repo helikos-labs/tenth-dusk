@@ -1,11 +1,10 @@
 // Look check (ART-DIRECTION §6): the built app's world at phone size, as a picture to look at. Serves dist/ with
 // `vite preview`, opens ?test=1&seed=REACH1 at 390 × 844 (deviceScaleFactor 1), starts a new journey, waits for
 // window.__worldReady plus 3 s, hides every .td-layer that has no canvas, and saves tests/e2e/out/look-world.png, with the
-// vignette and grain (.td-atmos, §3.8), which must never take a tap. No falling ash over the unseen (C7, §3.6): two
-// pictures 600 ms apart differ by a mean under 6 levels over a 120 × 120 box of the unseen mist at the top centre (the
-// mist moves slowly), and in it and in a box of the unseen mist just beyond the seen ground (where the flakes' box
-// reaches) fewer than 20 pixels change by over 40 levels (the mist alone moves a pixel by at most about 35; a flake
-// over it by up to about 95). Then it
+// vignette and grain (.td-atmos, §3.8), which must never take a tap. No falling ash over the unseen (C7, §3.6): in two
+// pictures 600 ms apart, over a 120 × 120 box of the unseen mist at the top centre and one just beyond the seen ground
+// (where the flakes' box reaches), fewer than 20 pixels change by over 40 levels (R14: the mist alone moves a pixel by
+// at most about 35; a flake over it by up to about 95). Then it
 // walks to the nearest reachable wood, zooms in on it and saves look-trees.png, asserting the trees stand out from
 // the ground (mean of the brightest 15% of a 56 × 56 box at least 1.25 × its median luminance). Last, the warmth of lit
 // beacons (§3.7): the save edited (rules/save.ts's format, as flow.mjs's push step does) so one beacon is lit and the
@@ -177,9 +176,9 @@ const UNSEEN_TOP = { x: 135, y: 40, width: 120, height: 120 }
 const UNSEEN_NEAR = { x: 135, y: 300, width: 120, height: 120 }
 
 /**
- * No falling ash over the unseen (C7): a second picture 600 ms after `first`. Over UNSEEN_TOP the mean absolute
- * difference per channel must be under 6 levels (the mist moves slowly); over both boxes fewer than 20 pixels may
- * change by over 40 levels in any channel (measured with the fog's gate on the flakes switched off: about 75 do).
+ * No falling ash over the unseen (C7): a second picture 600 ms after `first`. Over both boxes fewer than 20 pixels may
+ * change by over 40 levels in any channel (R14; measured with the fog's gate on the flakes switched off: about 75 do).
+ * The mean change is printed only: the mist alone scores 5.5 or so, too near any limit to test.
  */
 async function unseenStill(page, first) {
   await page.waitForTimeout(600)
@@ -187,7 +186,6 @@ async function unseenStill(page, first) {
   for (const [name, box] of [['top centre', UNSEEN_TOP], ['beyond the seen ground', UNSEEN_NEAR]]) {
     const d = await boxDiff(page, first, second, box)
     console.log(`unseen ${name} 600 ms apart: mean |Δ| ${d.mean.toFixed(2)}, ${d.jumps} pixels change by over 40 (rgb ${d.rgb})`)
-    if (box === UNSEEN_TOP && d.mean >= 6) fail(`the unseen ${name} changes by a mean of ${d.mean.toFixed(2)} levels in 600 ms (at most 6)`)
     if (d.jumps >= 20) fail(`${d.jumps} pixels of the unseen ${name} jump by over 40 levels in 600 ms (falling ash over the unseen?)`)
   }
 }
