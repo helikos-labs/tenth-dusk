@@ -494,9 +494,10 @@ export const ASH_LOOK = { ASH: new THREE.Color('#9a958a'), HAZE: new THREE.Color
  * ground (C7). `cloud` is rr_cloud's value over its range (0 to 1). Needs FOG_TINT_GLSL.
  */
 export const ASH_GLSL = /* glsl */ `
-// The pale ash blend (0 to 0.35) where the cloud noise runs high.
+// The pale ash blend (0 to 0.5) where the cloud noise runs high: from the cloud's edge, so a patch reads at the default
+// zoom, strongest at its heart.
 float td_ash(float cloud) {
-  return 0.35 * smoothstep(0.05, 0.5, cloud);
+  return 0.5 * smoothstep(0.0, 0.4, cloud);
 }
 // Colour c at world point wpos under the low haze: thickest on low ground, drifting with the cloud noise, scaled by
 // seen (td_seenShare).
