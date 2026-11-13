@@ -671,7 +671,10 @@ TDFog rr_fog = td_fogAt(rr_prov);
 // Ash drifts on seen land (the sea floor is no province, so never seen; not on a lake's bed), before lighting.
 float td_seen = td_seenShare(rr_fog);
 diffuseColor.rgb = mix(diffuseColor.rgb, ${glsl(ASH_LOOK.ASH)}, td_ash(td_cl) * td_seen * (1.0 - rr_prov.lake));
-diffuseColor.rgb = td_tintSeen(diffuseColor.rgb, rr_fog, vWPos.xz);`,
+diffuseColor.rgb = td_tintSeen(diffuseColor.rgb, rr_fog, vWPos.xz);
+// Warmth round lit beacons (§3.7), on seen ground only (C7): the albedo here, the fire's glow with the emissive.
+float td_w = td_warmth(vWPos.xz) * td_seen;
+diffuseColor.rgb = td_warm(diffuseColor.rgb, td_w);`,
       )
       .replace(
         '#include <normal_fragment_maps>',
@@ -705,6 +708,7 @@ if (rr_snow > 0.01) {
       .replace(
         '#include <emissivemap_fragment>',
         `#include <emissivemap_fragment>
+totalEmissiveRadiance += td_glow(td_w);
 // Highlights show only on what is in sight (the in-sight share of the fog here), never on unseen, sunk or remembered
 // ground. Target hint: a gilt rim that breathes. Hover: green for legal, red for not. Both run round the whole outline,
 // along the coast too where a rim province meets the sea.
@@ -729,13 +733,11 @@ if (rr_state(rr_prov.slot, 2.0).b > 0.5) {
         `#include <opaque_fragment>
 // The unseen share after lighting: flat fog, not shaded by the sun.
 gl_FragColor.rgb = mix(gl_FragColor.rgb, td_unseen(rr_fog.w.x > 0.0 ? td_mistNoise(vWPos.xz, uTime) : 0.0), rr_fog.w.x / td_sum(rr_fog));
-// Warmth round lit beacons (§3.7), on seen ground only (C7).
-gl_FragColor.rgb = td_warm(gl_FragColor.rgb, td_warmth(vWPos.xz) * td_seen);
 // The low haze, on seen ground only (C7).
 gl_FragColor.rgb = td_haze(gl_FragColor.rgb, vWPos, td_seen, td_cl);`,
       )
   }
-  mat.customProgramCacheKey = () => 'td-terrain-fog-5'
+  mat.customProgramCacheKey = () => 'td-terrain-fog-6'
   return mat
 }
 
@@ -886,8 +888,11 @@ export function windPatch(mat: THREE.Material, uniforms: { uTime: { value: numbe
         '#include <color_fragment>',
         `#include <color_fragment>\ndiffuseColor.rgb *= 1.0 - rr_cloud(rr_wpos.xz, uTime);` +
           (fog ? `\ndiffuseColor.rgb = td_tint(diffuseColor.rgb, td_one(rr_fog), rr_wpos.xz, 0.0);` : '') +
-          (lit ? `\n// Warmth round lit beacons (§3.7), on seen plants only (C7).\ndiffuseColor.rgb = td_warm(diffuseColor.rgb, td_warmth(rr_wpos.xz) * td_seenShare(td_one(rr_fog)));` : ''),
+          (lit
+            ? `\n// Warmth round lit beacons (§3.7), on seen plants only (C7): the albedo here, the fire's glow with the emissive.\nfloat td_w = td_warmth(rr_wpos.xz) * td_seenShare(td_one(rr_fog));\ndiffuseColor.rgb = td_warm(diffuseColor.rgb, td_w);`
+            : ''),
       )
+      .replace('#include <emissivemap_fragment>', `#include <emissivemap_fragment>` + (lit ? `\ntotalEmissiveRadiance += td_glow(td_w);` : ''))
     shader.vertexShader = shader.vertexShader
       .replace(
         '#include <common>',
@@ -925,7 +930,7 @@ export function windPatch(mat: THREE.Material, uniforms: { uTime: { value: numbe
 #endif`,
       )
   }
-  mat.customProgramCacheKey = () => `rr-wind2-${key}${fog ? '-fog2' : ''}${lit ? '-lit' : ''}`
+  mat.customProgramCacheKey = () => `rr-wind2-${key}${fog ? '-fog2' : ''}${lit ? '-lit2' : ''}`
 }
 
 /**

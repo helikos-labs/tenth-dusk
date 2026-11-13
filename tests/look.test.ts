@@ -4,7 +4,7 @@ import test from 'node:test'
 import { PALETTE } from '../src/world/palette.ts'
 import { FLOWERS, HEATH_FLOWERS } from '../src/world/flora.ts'
 import { SQRT3, buildField, hexCenter } from '../src/world/field.ts'
-import { WARM_RADIUS, WARMTH_GLSL, litPositions, warmthAt } from '../src/world/warmth.ts'
+import { WARM_FULL, WARM_GLOW, WARM_RADIUS, WARMTH_GLSL, litPositions, warmthAt } from '../src/world/warmth.ts'
 import { toAxial, unkey } from '../src/rules/hex.ts'
 import { FLOWER_SHARE, LEAFY_SHARE, SNAPPED_SHARE, broadleaf, conifer, crown, deadleaf, plantsFor, reed, stem } from '../src/world/vegetation.ts'
 import * as THREE from 'three'
@@ -287,7 +287,8 @@ test('warmth falls off over about 2.5 hexes', () => {
 test('the warmth GLSL mirrors warmthAt, three beacons written out', () => {
   assert.match(WARMTH_GLSL, /float td_warmth\(vec2 xz\)/)
   for (const u of ['uLit0', 'uLit1', 'uLit2']) assert.match(WARMTH_GLSL, new RegExp(`uniform vec3 ${u};`))
-  assert.ok(WARMTH_GLSL.includes(WARM_RADIUS.toFixed(4)), 'the radius is WARM_RADIUS')
+  assert.ok(WARMTH_GLSL.includes(`smoothstep(${WARM_FULL.toFixed(4)}, ${WARM_RADIUS.toFixed(4)},`), 'the falloff runs from WARM_FULL to WARM_RADIUS')
+  assert.ok(WARMTH_GLSL.includes(`w * vec3(${WARM_GLOW.map((v) => v.toFixed(4)).join(', ')})`), 'the glow is WARM_GLOW')
   assert.ok(WARMTH_GLSL.includes('mix(vec3(1.0), vec3(1.08, 1.0, 0.9), w)'), 'the warm tint')
   assert.ok(WARMTH_GLSL.includes('1.0 + 0.6 * w'), 'the restored saturation')
 })
@@ -300,9 +301,15 @@ test('ground and plants warm only where seen (C7)', async () => {
   makeTerrainMaterial(lit as never).onBeforeCompile(terrain, null as never)
   for (const u of Object.keys(lit)) assert.ok(u in terrain.uniforms, `terrain has ${u}`)
   const frag = terrain.fragmentShader
-  const unseen = frag.indexOf('td_unseen(rr_fog.w.x')
-  const warm = frag.indexOf('td_warm(gl_FragColor.rgb, td_warmth(vWPos.xz) * td_seen)')
-  assert.ok(unseen > 0 && warm > unseen, 'the ground warms after the unseen tint, by its seen share')
+  // Both parts at one stage on the ground and the plants: the albedo after the fog tint, before lighting; the glow with
+  // the emissive, added to it apart from the highlights (no saturation boost on the reach rim).
+  const tinted = frag.indexOf('diffuseColor.rgb = td_tintSeen(')
+  const w = frag.indexOf('float td_w = td_warmth(vWPos.xz) * td_seen;')
+  const albedo = frag.indexOf('diffuseColor.rgb = td_warm(diffuseColor.rgb, td_w);')
+  const emissive = frag.indexOf('#include <emissivemap_fragment>')
+  const glow = frag.indexOf('totalEmissiveRadiance += td_glow(td_w);')
+  assert.ok(tinted > 0 && w > tinted && albedo > w && emissive > albedo && glow > emissive, 'the ground warms its albedo after its fog tint, then glows')
+  assert.ok(!frag.includes('td_warm(gl_FragColor'), 'nothing warms the lit colour (or the highlights in it)')
   const plants = { uniforms: {}, vertexShader: stub, fragmentShader: stub } as unknown as THREE.WebGLProgramParametersWithUniforms
   const mat = new THREE.MeshStandardMaterial()
   windPatch(mat, { uTime: { value: 0 }, uState: { value: null }, ...lit } as never, 0.1, 'test')
@@ -310,6 +317,15 @@ test('ground and plants warm only where seen (C7)', async () => {
   for (const u of Object.keys(lit)) assert.ok(u in plants.uniforms, `plants have ${u}`)
   const pf = plants.fragmentShader
   const tint = pf.indexOf('td_tint(diffuseColor.rgb')
-  const pw = pf.indexOf('td_warm(diffuseColor.rgb, td_warmth(rr_wpos.xz) * td_seenShare(td_one(rr_fog)))')
-  assert.ok(tint > 0 && pw > tint, 'plants warm after their fog tint, by their seen share')
+  const pw = pf.indexOf('float td_w = td_warmth(rr_wpos.xz) * td_seenShare(td_one(rr_fog));')
+  const pa = pf.indexOf('diffuseColor.rgb = td_warm(diffuseColor.rgb, td_w);')
+  const pe = pf.indexOf('#include <emissivemap_fragment>')
+  const pg = pf.indexOf('totalEmissiveRadiance += td_glow(td_w);')
+  assert.ok(tint > 0 && pw > tint && pa > pw && pe > pa && pg > pe, 'plants warm their albedo after their fog tint, then glow')
+  // Fog without the lit uniforms: no warmth code (an unset uniform would read the origin as a lit beacon).
+  const bare = { uniforms: {}, vertexShader: stub, fragmentShader: stub } as unknown as THREE.WebGLProgramParametersWithUniforms
+  const fogOnly = new THREE.MeshStandardMaterial()
+  windPatch(fogOnly, { uTime: { value: 0 }, uState: { value: null } } as never, 0.1, 'test')
+  fogOnly.onBeforeCompile(bare, null as never)
+  assert.ok(!bare.fragmentShader.includes('td_warm') && !bare.fragmentShader.includes('uLit0'), 'fog-only plants carry no warmth')
 })
