@@ -4,7 +4,7 @@ import test from 'node:test'
 import { PALETTE } from '../src/world/palette.ts'
 import { FLOWERS, HEATH_FLOWERS } from '../src/world/flora.ts'
 import { buildField } from '../src/world/field.ts'
-import { FLOWER_SHARE, plantsFor, reed, stem } from '../src/world/vegetation.ts'
+import { FLOWER_SHARE, LEAFY_SHARE, SNAPPED_SHARE, broadleaf, conifer, crown, deadleaf, plantsFor, reed, stem } from '../src/world/vegetation.ts'
 import * as THREE from 'three'
 import { VALLEY } from './fixtures/valley.ts'
 
@@ -54,5 +54,74 @@ test('reed and flower stem vertex colours are not green', () => {
       const { r, g: gr, b } = c.getRGB({ r: 0, g: 0, b: 0 }, THREE.SRGBColorSpace)
       assert.ok(gr - Math.max(r, b) <= 0.02, `${name} vertex ${i} reads green (${c.getHexString(THREE.SRGBColorSpace)})`)
     }
+  }
+})
+
+/** Triangles of a non-indexed geometry. */
+const tris = (g: THREE.BufferGeometry) => g.getAttribute('position').count / 3
+/** Each vertex colour as the hex reads (the attribute holds three's linear working space). */
+const srgb = (g: THREE.BufferGeometry): THREE.Color[] => {
+  const a = g.getAttribute('color')
+  return Array.from({ length: a.count }, (_, i) => new THREE.Color().setRGB(a.getX(i), a.getY(i), a.getZ(i), THREE.LinearSRGBColorSpace))
+}
+
+// Measured from the green trees before the restyle (conifer 68, broadleaf 344 triangles).
+const OLD_CONIFER_TRIS = 68
+const OLD_BROADLEAF_TRIS = 344
+
+test('dead trees fit the old triangle budget', () => {
+  assert.ok(tris(conifer()) + tris(crown()) <= OLD_CONIFER_TRIS, `pine ${tris(conifer()) + tris(crown())}`)
+  assert.ok(tris(broadleaf()) + tris(deadleaf()) <= OLD_BROADLEAF_TRIS, `broadleaf ${tris(broadleaf()) + tris(deadleaf())}`)
+})
+
+test('most broadleaves are bare', () => {
+  assert.equal(LEAFY_SHARE, 0.3)
+  const p = plantsFor(buildField(VALLEY), VALLEY, 1)
+  assert.ok(p.oak.count > 50, `${p.oak.count} oaks`)
+  const share = p.deadleaf.count / p.oak.count
+  assert.ok(Math.abs(share - LEAFY_SHARE) <= 0.08, `leafy share ${share.toFixed(3)}`)
+})
+
+test('some pines are snapped', () => {
+  assert.equal(SNAPPED_SHARE, 0.25)
+  const p = plantsFor(buildField(VALLEY), VALLEY, 1)
+  assert.ok(p.conifer.count > 50, `${p.conifer.count} pines`)
+  const share = p.crown.count / p.conifer.count
+  assert.ok(Math.abs(share - (1 - SNAPPED_SHARE)) <= 0.08, `crowned share ${share.toFixed(3)}`)
+})
+
+test('crown and leaves sit on their tree', () => {
+  const p = plantsFor(buildField(VALLEY), VALLEY, 1)
+  const has = (set: { matrix: Float32Array; color: Float32Array | null }, i: number, from: typeof set, j: number) => {
+    for (let k = 0; k < 16; k++) if (set.matrix[i * 16 + k] !== from.matrix[j * 16 + k]) return false
+    return true
+  }
+  // Every crown is some pine's matrix and colour, in the same order.
+  let j = 0
+  for (let i = 0; i < p.crown.count; i++) {
+    while (j < p.conifer.count && !has(p.crown, i, p.conifer, j)) j++
+    assert.ok(j < p.conifer.count, `crown ${i} has no pine`)
+    for (let k = 0; k < 3; k++) assert.equal(p.crown.color![i * 3 + k], p.conifer.color![j * 3 + k])
+    j++
+  }
+})
+
+test('trees are pale and dead', () => {
+  for (const [name, g] of [['pine', conifer()], ['broadleaf', broadleaf()]] as const) {
+    // Only the trunk reaches the ground: its base ring is the vertices at y = 0.
+    const pos = g.getAttribute('position')
+    const base = srgb(g).filter((_, i) => Math.abs(pos.getY(i)) < 1e-6)
+    assert.ok(base.length > 0, `${name} has a trunk base`)
+    for (const c of base) {
+      const { s, l } = c.getHSL({ h: 0, s: 0, l: 0 }, THREE.SRGBColorSpace)
+      assert.ok(l >= 0.6, `${name} trunk lightness ${l.toFixed(2)}`)
+      assert.ok(s <= 0.2, `${name} trunk saturation ${s.toFixed(2)}`)
+    }
+  }
+  for (const [name, g] of [['conifer', conifer()], ['crown', crown()], ['broadleaf', broadleaf()], ['deadleaf', deadleaf()]] as const) {
+    srgb(g).forEach((c, i) => {
+      const { r, g: gr, b } = c.getRGB({ r: 0, g: 0, b: 0 }, THREE.SRGBColorSpace)
+      assert.ok(gr - Math.max(r, b) <= 0.02, `${name} vertex ${i} reads green (${c.getHexString(THREE.SRGBColorSpace)})`)
+    })
   }
 })

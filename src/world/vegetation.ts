@@ -22,6 +22,9 @@ export const CLEARING = 0.34
 /** The share of today's flowers that still bloom: the land is dying (ART-DIRECTION §3.2). */
 export const FLOWER_SHARE = 1 / 3
 /** Old wood (§15.3): its trees stand this many times as thick as a forest's, and darker. */
+/** Share of broadleaves that keep a clump of dead leaves (the rest are bare), and of pines that lost their crown. */
+export const LEAFY_SHARE = 0.3
+export const SNAPPED_SHARE = 0.25
 export const OLD_WOOD = { density: 1.6, shade: 0.72 }
 
 /** mulberry32 seeded from a hex. */
@@ -91,27 +94,43 @@ const strip = (g: THREE.BufferGeometry) => {
   return out
 }
 
-function conifer(): THREE.BufferGeometry {
-  const parts = [paint(new THREE.CylinderGeometry(0.016, 0.024, 0.13, 5).translate(0, 0.065, 0), C('#5b3d25'))]
+/** A dead pine's trunk and its two lower tiers of ragged needles (its top tier is `crown`). */
+export function conifer(): THREE.BufferGeometry {
+  const parts = [paint(new THREE.CylinderGeometry(0.012, 0.022, 0.4, 5).translate(0, 0.2, 0), C('#b3ac9f'))]
   const tiers = [
-    [0.135, 0.23, 0.2, '#244b29'],
-    [0.11, 0.21, 0.31, '#2b5a2f'],
-    [0.08, 0.19, 0.42, '#356a37'],
+    [0.1, 0.12, 0.17, '#5b5c52'],
+    [0.075, 0.1, 0.26, '#66665b'],
   ] as const
-  tiers.forEach(([r, h, y, c], i) => parts.push(paint(jitter(new THREE.ConeGeometry(r, h, 8, 1).translate(0, y, 0), 0.012, 11 + i), C(c))))
+  tiers.forEach(([r, h, y, c], i) => parts.push(paint(jitter(new THREE.ConeGeometry(r, h, 6, 1).translate(0, y, 0), 0.03, 11 + i), C(c))))
   return mergeGeometries(parts.map(strip))!
 }
 
-function broadleaf(): THREE.BufferGeometry {
-  const parts = [paint(new THREE.CylinderGeometry(0.02, 0.03, 0.17, 6).translate(0, 0.085, 0), C('#62452c'))]
-  const blobs = [
-    [0, 0.25, 0, 0.12, '#3f6f2c'],
-    [0.07, 0.22, 0.03, 0.09, '#4a7d31'],
-    [-0.06, 0.23, -0.04, 0.095, '#3a6729'],
-    [0.01, 0.33, -0.02, 0.085, '#5a9038'],
+/** A dead pine's top tier: absent on the pines whose crowns have snapped. */
+export function crown(): THREE.BufferGeometry {
+  return strip(paint(jitter(new THREE.ConeGeometry(0.05, 0.08, 6, 1).translate(0, 0.34, 0), 0.03, 13), C('#737266')))
+}
+
+/** A blighted broadleaf: a pale trunk and five bare, tapering limbs (its rust leaves are `deadleaf`). */
+export function broadleaf(): THREE.BufferGeometry {
+  const wood = C('#bab2a4')
+  const parts = [paint(new THREE.CylinderGeometry(0.014, 0.026, 0.2, 5).translate(0, 0.1, 0), wood)]
+  // Tilt, yaw, length, base radius.
+  const limbs = [
+    [0.6, 0, 0.2, 0.022],
+    [-0.7, 2.1, 0.18, 0.02],
+    [0.5, 4.2, 0.19, 0.019],
+    [0.25, 1.0, 0.16, 0.015],
+    [-0.4, 3.3, 0.14, 0.013],
   ] as const
-  blobs.forEach(([x, y, z, r, c], i) => parts.push(paint(jitter(new THREE.IcosahedronGeometry(r, 1).translate(x, y, z), 0.014, 31 + i), C(c))))
+  for (const [tilt, yaw, len, r] of limbs) {
+    parts.push(paint(new THREE.CylinderGeometry(r * 0.35, r, len, 4).translate(0, len / 2, 0).rotateZ(tilt).rotateY(yaw).translate(0, 0.17, 0), wood))
+  }
   return mergeGeometries(parts.map(strip))!
+}
+
+/** One small clump of dead rust-brown leaves, on some broadleaves only. */
+export function deadleaf(): THREE.BufferGeometry {
+  return strip(paint(new THREE.IcosahedronGeometry(0.05, 0).translate(0.06, 0.3, 0.02), C('#8e6440')))
 }
 
 function tuft(): THREE.BufferGeometry {
@@ -200,7 +219,7 @@ function boulder(seed: number): THREE.BufferGeometry {
 // are placed again (worldBuild.ts) and every other province keeps exactly the plants it had.
 
 /** The kinds of plant; each is one instanced mesh (flowers are two: stems and heads on the same spots). */
-export const PLANT_KINDS = ['conifer', 'oak', 'tuft', 'reed', 'flower', 'rock'] as const
+export const PLANT_KINDS = ['conifer', 'crown', 'oak', 'deadleaf', 'tuft', 'reed', 'flower', 'rock'] as const
 export type PlantKind = (typeof PLANT_KINDS)[number]
 /** Kinds drawn without a tint of their own. */
 const UNTINTED: readonly PlantKind[] = ['rock']
@@ -242,6 +261,12 @@ function put(lists: PlantLists, kind: PlantKind, p: Placement) {
   const list = lists[kind]
   for (let i = 0; i < 16; i++) list.matrix.push(mat4.elements[i])
   if (p.color) list.color.push(p.color.r, p.color.g, p.color.b)
+}
+
+/** Adds a tree: a pine (with its crown, unless snapped) or a broadleaf (with its dead leaves, on some). */
+function putTree(lists: PlantLists, kind: 'conifer' | 'oak', p: Placement, rand: () => number) {
+  put(lists, kind, p)
+  if (kind === 'conifer' ? rand() >= SNAPPED_SHARE : rand() < LEAFY_SHARE) put(lists, kind === 'conifer' ? 'crown' : 'deadleaf', p)
 }
 
 const tint = (rand: () => number, spread: number) => new THREE.Color(1, 1, 1).multiplyScalar(1 - spread / 2 + rand() * spread)
@@ -291,7 +316,7 @@ export function placeProvince(field: Field, cell: WorldCell, detail = 1, flowerS
       const color = tint(rand, 0.32)
       if (cell.dense) color.multiplyScalar(OLD_WOOD.shade)
       const item = { x: s.x, y: pr.height - 0.004, z: s.z, s: 0.82 + rand() * 0.45, rot: rand() * Math.PI * 2, color }
-      put(out, rand() < pine ? 'conifer' : 'oak', item)
+      putTree(out, rand() < pine ? 'conifer' : 'oak', item, rand)
     }
   }
 
@@ -320,7 +345,7 @@ export function placeProvince(field: Field, cell: WorldCell, detail = 1, flowerS
       if (rand() > Math.max(fringe, 0.012)) continue
       const bush = rand() < 0.5
       const item = { x: s.x, y: pr.height - 0.004, z: s.z, s: bush ? 0.32 + rand() * 0.18 : 0.55 + rand() * 0.3, rot: rand() * Math.PI * 2, color: tint(rand, 0.3) }
-      put(out, bush || rand() < 0.45 ? 'oak' : 'conifer', item)
+      putTree(out, bush || rand() < 0.45 ? 'oak' : 'conifer', item, rand)
     }
     // Flowers grow in clumps: a main kind and a second kind per field.
     const { main, second } = flowersOf(cell.q, cell.r, cell.heath)
@@ -370,7 +395,7 @@ export function placeProvince(field: Field, cell: WorldCell, detail = 1, flowerS
       const y = pr.height - 0.004
       if (rand() < 0.42) put(out, 'rock', { x: s.x, y: y - 0.01, z: s.z, s: 0.7 + rand() * 0.9, rot: rand() * Math.PI * 2, tilt: (rand() - 0.5) * 0.5 })
       // Hardy pines on the lower slopes (measured from the terrace the range stands on).
-      else if (y - pr.terrace < 0.34 && y > WATER_LEVEL + 0.02 && rand() < 0.5) put(out, 'conifer', { x: s.x, y, z: s.z, s: 0.55 + rand() * 0.3, rot: rand() * 6.28, color: tint(rand, 0.25) })
+      else if (y - pr.terrace < 0.34 && y > WATER_LEVEL + 0.02 && rand() < 0.5) putTree(out, 'conifer', { x: s.x, y, z: s.z, s: 0.55 + rand() * 0.3, rot: rand() * 6.28, color: tint(rand, 0.25) }, rand)
     }
   } else if (cell.terrain !== 'water') {
     // Boulders fan out round a range's foot.
@@ -445,7 +470,7 @@ export function placeIslets(field: Field): PlantLists {
     if (above > 0.03) {
       const r = rand()
       if (r < 0.1) put(out, 'rock', { x: p.x, y: pr.height - 0.012, z: p.z, s: 0.5 + rand() * 0.9, rot: rand() * 6.28, tilt: (rand() - 0.5) * 0.6 })
-      else if (r < 0.15 && above > 0.06) put(out, 'conifer', { x: p.x, y: pr.height - 0.004, z: p.z, s: 0.5 + rand() * 0.3, rot: rand() * 6.28, tilt: 0.12, color: tint(rand, 0.25) })
+      else if (r < 0.15 && above > 0.06) putTree(out, 'conifer', { x: p.x, y: pr.height - 0.004, z: p.z, s: 0.5 + rand() * 0.3, rot: rand() * 6.28, tilt: 0.12, color: tint(rand, 0.25) }, rand)
       else if (r < 0.3) put(out, 'tuft', { x: p.x, y: pr.height - 0.004, z: p.z, s: 0.7 + rand() * 0.5, rot: rand() * 6.28, color: tint(rand, 0.3).multiplyScalar(0.9) })
     } else if (above > -0.1 && pr.cliff > 0.5 && pr.sd.sea < 0.35 && rand() < 0.05) {
       put(out, 'rock', { x: p.x, y: pr.height + 0.01, z: p.z, s: 0.6 + rand() * 0.8, rot: rand() * 6.28, tilt: (rand() - 0.5) * 0.6 })
@@ -526,7 +551,9 @@ export class PlantMeshes {
     })
     this.parts = [
       part('conifer', conifer(), plant(0.08, 'tree'), true),
+      part('crown', crown(), plant(0.08, 'tree'), true),
       part('oak', broadleaf(), plant(0.07, 'oak'), true),
+      part('deadleaf', deadleaf(), plant(0.07, 'oak'), true),
       part('tuft', tuft(), plant(2.4, 'grass', { side: THREE.DoubleSide, roughness: 0.95 }), false),
       part('reed', reed(), plant(1.6, 'reed', { side: THREE.DoubleSide, roughness: 0.9 }), false),
       // Flower stems stand on the heads' spots, untinted.
