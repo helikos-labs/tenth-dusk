@@ -13,7 +13,7 @@ export const HERO_HEIGHT = 1
 const K = HERO_HEIGHT / 1.145
 
 /** The lantern's light: warm, short-reaching, flickering round `LIGHT.intensity`. */
-export const LIGHT = { color: '#ff9248', intensity: 4, distance: 4, decay: 2 }
+export const LIGHT = { color: '#ff9248', intensity: 5, distance: 5.5, decay: 2 }
 
 /** The lantern's halo: an additive glow this wide (before the hero's scale), flickering with the light. */
 const HALO = 0.8

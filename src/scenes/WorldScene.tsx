@@ -74,7 +74,7 @@ export interface WorldSceneProps {
 }
 
 /** The Hush beyond the walls: the fog's colour and the sky's. */
-export const DUSK = '#141a24'
+export const DUSK = '#14171c'
 /**
  * The follow camera (§4): it looks down at `pitch` degrees with a vertical field of view of `fov`, at the hero kept
  * `heroAt` of the way down the screen, easing after them with a half-life of `halfLife` seconds. At the default zoom
@@ -86,10 +86,10 @@ const CAMERA = { pitch: 60, fov: 35, heroAt: 0.62, halfLife: 0.25, hexPx: 50, ac
 const FOG = { near: 1.2, far: 2.2 }
 /** The low warm sun: the direction it shines from, its colour and strength. */
 const SUN = new THREE.Vector3(-9, 12, 5)
-const SUN_COLOR = 0xffe0c0
-const SUN_INTENSITY = 2.1
+const SUN_COLOR = 0xd9c6b0
+const SUN_INTENSITY = 1.55
 /** Sky and ground of the hemisphere light. */
-const HEMI = { sky: 0x8ea3c2, ground: 0x2a221d, intensity: 0.75 }
+const HEMI = { sky: 0x6c7684, ground: 0x221d19, intensity: 0.6 }
 /** The models' sizes in the world (the hero is HERO_HEIGHT tall before it; a hex has circumradius 1). */
 const SCALE = { hero: 2.4, landmark: 1 }
 /** The hero's walk: seconds per hex. */
@@ -641,7 +641,7 @@ function Sky() {
   const scene = useThree((st) => st.scene)
   useLayoutEffect(() => {
     scene.background = new THREE.Color(DUSK)
-    scene.fog = new THREE.Fog(DUSK, 40, 80)
+    scene.fog = new THREE.Fog(DUSK, 30, 70)
   }, [scene])
   return null
 }

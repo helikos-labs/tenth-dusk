@@ -5,6 +5,9 @@ import { ThemeProvider } from '@mui/material/styles'
 import App from './ui/App.tsx'
 import Guard from './ui/Guard.tsx'
 import { theme } from './theme.ts'
+import { installGrade } from './world/grade.ts'
+
+installGrade()
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>

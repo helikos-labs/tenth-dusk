@@ -6,6 +6,7 @@ import { FLOWERS, HEATH_FLOWERS } from '../src/world/flora.ts'
 import { buildField } from '../src/world/field.ts'
 import { FLOWER_SHARE, LEAFY_SHARE, SNAPPED_SHARE, broadleaf, conifer, crown, deadleaf, plantsFor, reed, stem } from '../src/world/vegetation.ts'
 import * as THREE from 'three'
+import { GRADE_GLSL, gradeRGB, installGrade } from '../src/world/grade.ts'
 import { VALLEY } from './fixtures/valley.ts'
 
 /** HSL as the hex reads, in sRGB (three's default would read the linear working space). */
@@ -124,4 +125,27 @@ test('trees are pale and dead', () => {
       assert.ok(gr - Math.max(r, b) <= 0.02, `${name} vertex ${i} reads green (${c.getHexString(THREE.SRGBColorSpace)})`)
     })
   }
+})
+
+test('grade installs once', () => {
+  installGrade()
+  installGrade()
+  const chunk = THREE.ShaderChunk.tonemapping_fragment
+  assert.equal(chunk.split('td_grade').length - 1, 1)
+  assert.ok(GRADE_GLSL.includes('td_grade'))
+})
+
+test('grade keeps the blacks, drains saturation, leaves grey near grey', () => {
+  const black = gradeRGB([0, 0, 0])
+  for (const v of black) assert.ok(Math.abs(v) < 0.01, `black ${black}`)
+  // HSL saturation, as the rest of this file reads colour.
+  const sat = (c: number[]) => {
+    const hi = Math.max(...c)
+    const lo = Math.min(...c)
+    return (hi - lo) / (1 - Math.abs(hi + lo - 1))
+  }
+  const green: [number, number, number] = [0.2, 0.6, 0.2]
+  assert.ok(sat(gradeRGB(green)) <= sat(green) * 0.75, `green ${gradeRGB(green)}`)
+  const grey = gradeRGB([0.5, 0.5, 0.5])
+  for (const v of grey) assert.ok(Math.abs(v - 0.5) < 0.05, `grey ${grey}`)
 })
