@@ -550,6 +550,11 @@
   text-decoration-thickness: 1.5px;
   color: var(--td-ink-soft);
 }
+/* A figure in Fell text ("+1" in a notice, "Chapter 1"): lining Garamond, as Fell has only old-style digits (R19, R22). */
+.td-fig {
+  font-family: var(--td-garamond);
+  font-variant-numeric: lining-nums tabular-nums;
+}
 /* Text for screen readers and the tests, which the plate shows another way. */
 .td-sr {
   position: absolute;

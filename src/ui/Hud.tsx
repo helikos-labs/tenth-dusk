@@ -2,12 +2,13 @@
 // tracker, the chip (a blocked tap's, else what the rules just did, R24) and the bottom bar (vigour, the steps left,
 // and Move · Camp · Pack · Journal). Move walks the path previewed (as a second tap on its end does), or presses on into
 // the night when no move is left by day; Journal waits for a later milestone.
-import { useMemo, type CSSProperties } from 'react'
+import { Fragment, useMemo, type CSSProperties } from 'react'
 import { LAST_DAY, NIGHT_STEPS, STEPS_PER_DAY, type RunState } from '../rules/run.ts'
 import type { Off } from '../rules/hex.ts'
 import DayDial from './DayDial.tsx'
 import { Icon, type IconName } from './Icons.tsx'
 import { roman } from './roman.ts'
+import { figureParts } from './notices.ts'
 import { canPressOn, type GameAction } from './useGame.ts'
 
 interface HudProps {
@@ -22,14 +23,26 @@ interface HudProps {
 }
 
 const ORDINALS = ['First', 'Second', 'Third', 'Fourth', 'Fifth', 'Sixth', 'Seventh', 'Eighth', 'Ninth', 'Tenth']
-/** An event notice's line split on " · ": the lead in rubric, the rest in ink.  */
+/** Text with its figures in lining Garamond (.td-fig). */
+const withFigures = (text: string) =>
+  figureParts(text).map((p, i) =>
+    p.fig ? (
+      <span key={i} className="td-fig">
+        {p.text}
+      </span>
+    ) : (
+      <Fragment key={i}>{p.text}</Fragment>
+    ),
+  )
+
+/** An event notice's line split on " · ": the lead in rubric, the rest in ink, the figures in lining Garamond. */
 const noteLines = (line: string) => {
   const at = line.indexOf(' · ')
-  if (at < 0) return line
+  if (at < 0) return withFigures(line)
   return (
     <>
-      <b>{line.slice(0, at)}</b>
-      {line.slice(at)}
+      <b>{withFigures(line.slice(0, at))}</b>
+      {withFigures(line.slice(at))}
     </>
   )
 }

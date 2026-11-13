@@ -9,7 +9,9 @@ export default function ChapterEnd({ run, act }: { run: RunState; act: (a: GameA
   return (
     <main className="td-layer td-book td-book-fit td-over-world">
       <Page fit>
-        <p className="td-over">Chapter 1 · The Reach Road</p>
+        <p className="td-over">
+          Chapter <span className="td-fig">1</span> · The Reach Road
+        </p>
         <Ornament />
         {hearth ? (
           <p className="td-prose">

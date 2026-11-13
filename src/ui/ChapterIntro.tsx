@@ -7,7 +7,9 @@ export default function ChapterIntro({ act }: { act: (a: GameAction) => void }) 
     <main className="td-layer td-book td-book-fit td-over-world">
       <Page fit>
         <p className="td-over">Book I · The Saltreach</p>
-        <h1 className="td-heading">Chapter 1 · The Reach Road</h1>
+        <h1 className="td-heading">
+          Chapter <span className="td-fig">1</span> · The Reach Road
+        </h1>
         <Ornament />
         <p className="td-prose">
           <DropCap text="The ember lasts ten dusks. Reach the hearth of the Reach before it dies." />

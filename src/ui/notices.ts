@@ -23,6 +23,17 @@ export function eventCopy(e: RunEvent, name: string): string | null {
   }
 }
 
+/**
+ * A line cut into its figures (a signed or bare number, "−2", "+1") and the text between, in order, so the HUD can set
+ * the figures in lining Garamond: the chip is Fell, whose old-style digits misread ("+ı", R22, R28).
+ */
+export function figureParts(line: string): { text: string; fig: boolean }[] {
+  return line
+    .split(/([+−-]?\d+)/)
+    .map((text, i) => ({ text, fig: i % 2 === 1 }))
+    .filter((p) => p.text)
+}
+
 /** The line for the newest of `events` after the first `seen` that has one, or null. */
 export function newestNotice(events: RunEvent[], seen: number, name: string): string | null {
   for (let i = events.length - 1; i >= seen; i--) {

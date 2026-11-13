@@ -2,7 +2,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { camp, move, newRun } from '../src/rules/run.ts'
 import type { RunEvent } from '../src/rules/run.ts'
-import { eventCopy, newestNotice } from '../src/ui/notices.ts'
+import { eventCopy, figureParts, newestNotice } from '../src/ui/notices.ts'
 import { mk } from './helpers.ts'
 
 const at = { row: 0, col: 0 }
@@ -16,6 +16,28 @@ test('each event the player should see has its line; the rest say nothing', () =
   assert.equal(eventCopy(ev('sunk'), 'Ash'), 'The Hush takes the land behind')
   assert.equal(eventCopy(ev('beacon'), 'Ash'), 'Beacon lit · +1 max ember')
   for (const kind of ['moved', 'camped', 'hearth', 'expired'] as const) assert.equal(eventCopy(ev(kind), 'Ash'), null, kind)
+})
+
+test('figureParts cuts out the figures, signs and all, and keeps the text whole', () => {
+  assert.deepEqual(figureParts('The cold bites · −2 vigour'), [
+    { text: 'The cold bites · ', fig: false },
+    { text: '−2', fig: true },
+    { text: ' vigour', fig: false },
+  ])
+  assert.deepEqual(figureParts('Beacon lit · +1 max ember'), [
+    { text: 'Beacon lit · ', fig: false },
+    { text: '+1', fig: true },
+    { text: ' max ember', fig: false },
+  ])
+  assert.deepEqual(figureParts('10 dusks'), [
+    { text: '10', fig: true },
+    { text: ' dusks', fig: false },
+  ])
+  assert.deepEqual(figureParts('The Hush takes the land behind'), [{ text: 'The Hush takes the land behind', fig: false }])
+  for (const kind of ['cold', 'leeches', 'fell', 'pushed', 'sunk', 'beacon'] as const) {
+    const line = eventCopy(ev(kind), 'Ash') ?? ''
+    assert.equal(figureParts(line).map((p) => p.text).join(''), line, kind)
+  }
 })
 
 test('newestNotice tells the newest unseen event that has a line', () => {
