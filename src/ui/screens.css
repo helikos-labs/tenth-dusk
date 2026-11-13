@@ -476,19 +476,26 @@
   font-size: 13px;
   color: var(--td-ink-soft);
 }
+/* One row of stones in the 92 px column, whatever their count (--n, set by Hud.tsx: 6, and one more for each beacon
+   lit): 10 px stones with 4 px gaps while they fit (82 px inside the tray), then stones and gaps shrink together. The
+   tray keeps its height, so nothing moves when a beacon is lit. */
 .td-stones {
+  --stone: min(10px, calc(82px / (1.4 * var(--n, 6) - 0.4)));
   display: flex;
-  flex-wrap: wrap;
+  align-items: center;
   justify-content: center;
-  gap: 4px;
+  gap: calc(0.4 * var(--stone));
+  /* A 13 px stone and the padding (the box is border-box, from MUI's baseline). */
+  height: 21px;
   padding: 4px 5px;
   border-radius: 8px;
   background: linear-gradient(#24221f, #141311);
   box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.8), 0 1px 0 rgba(255, 240, 220, 0.25);
 }
 .td-stone {
-  width: 10px;
-  height: 13px;
+  flex: none;
+  width: var(--stone);
+  height: calc(1.3 * var(--stone));
   border-radius: 50% 50% 46% 46%;
   background: radial-gradient(circle at 40% 35%, #3a3632, #191715);
   box-shadow: inset 0 0 2px rgba(0, 0, 0, 0.8);

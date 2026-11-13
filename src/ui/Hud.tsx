@@ -2,7 +2,7 @@
 // tracker, the chip (a blocked tap's, else what the rules just did, R24) and the bottom bar (vigour, the steps left,
 // and Move · Camp · Pack · Journal). Move walks the path previewed (as a second tap on its end does), or presses on into
 // the night when no move is left by day; Journal waits for a later milestone.
-import { useMemo } from 'react'
+import { useMemo, type CSSProperties } from 'react'
 import { LAST_DAY, NIGHT_STEPS, STEPS_PER_DAY, type RunState } from '../rules/run.ts'
 import type { Off } from '../rules/hex.ts'
 import DayDial from './DayDial.tsx'
@@ -92,7 +92,7 @@ export default function Hud({ run, preview, walking, blocked, blockedN, notice, 
               <span className="td-ember-label" aria-hidden="true">
                 Ember
               </span>
-              <span className="td-stones" aria-hidden="true">
+              <span className="td-stones" aria-hidden="true" style={{ '--n': run.hero.maxEmber } as CSSProperties}>
                 {Array.from({ length: run.hero.maxEmber }, (_, i) => (
                   <i key={i} className={i < run.hero.ember ? 'td-stone td-lit' : 'td-stone'} />
                 ))}

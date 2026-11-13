@@ -16,9 +16,11 @@
 // and that ground box must also be 1.05 × the boxes 4 hexes across on seen land.
 // Then every screen (§6.2) at 360 × 640 and 390 × 844, deviceScaleFactor 2, in the Google faces (each must load; the
 // faces loaded are printed): title, name, intro, world HUD, camp, pack and satchel, the restoring notice of a lost WebGL
-// context, both chapter ends and, turned sideways, Upright, saved as look-<screen>-<width>.png, with look-chapter-7-
-// <width>.png, the day plate holding its longest chapter line. On every screen no text overflows its box; on the HUD the
-// top plate, slip and board lie apart and on the screen; with reduced motion the camp folio neither slides nor fades.
+// context, the HUD with every beacon lit (world-lit: the ember tray at its longest, 9 stones), both chapter ends and,
+// turned sideways, Upright, saved as look-<screen>-<width>.png, with look-chapter-7-<width>.png, the day plate holding
+// its longest chapter line. On every screen no text overflows its box; on the HUD the top plate, slip and board lie
+// apart and on the screen, and the ember stones sit in one row inside the tray's column (for 6 to 9 stones); with
+// reduced motion the camp folio neither slides nor fades.
 // The overflow and HUD checks run again with the font hosts blocked (the Georgia fallback).
 // Run after `npm run build`: node tests/e2e/look.mjs [screens]   (Playwright must resolve, as in smoke.mjs; `screens`
 // skips the world checks)
@@ -279,6 +281,44 @@ async function hudApart(page, tag) {
   }
 }
 
+/**
+ * The ember tray (I1): its stones in one row, inside the tray, and the tray inside its 92 px column of the day plate.
+ * Checked for the stones on the screen (`n` of them), then for 6 to 9 (the start, and one more for each beacon lit) on a
+ * copy of the tray with its count (--n) changed, the real tray hidden meanwhile.
+ */
+async function stonesInRow(page, tag, n) {
+  const bad = await page.evaluate((n) => {
+    const out = []
+    const real = document.querySelector('.td-stones')
+    const check = (tray, count, what) => {
+      const stones = [...tray.querySelectorAll('.td-stone')].map((s) => s.getBoundingClientRect())
+      const t = tray.getBoundingClientRect()
+      const col = tray.closest('.td-ember').getBoundingClientRect()
+      if (stones.length !== count) out.push(`${what}: ${stones.length} stones, not ${count}`)
+      const tops = stones.map((s) => s.top)
+      if (Math.max(...tops) - Math.min(...tops) > 0.5) out.push(`${what}: the stones lie in more than one row (tops ${[...new Set(tops.map((v) => v.toFixed(1)))]})`)
+      if (stones.some((s) => s.left < t.left - 0.5 || s.right > t.right + 0.5 || s.top < t.top - 0.5 || s.bottom > t.bottom + 0.5)) out.push(`${what}: a stone sticks out of the tray`)
+      if (t.left < col.left - 0.5 || t.right > col.right + 0.5) out.push(`${what}: the tray (${t.left.toFixed(1)}–${t.right.toFixed(1)}) leaves its column (${col.left}–${col.right})`)
+      if (stones.length && stones[0].width < 6) out.push(`${what}: stones ${stones[0].width.toFixed(1)} px wide`)
+    }
+    if (!real) return ['no ember tray']
+    check(real, n, `the tray of ${n}`)
+    real.style.display = 'none'
+    for (let count = 6; count <= 9; count++) {
+      const copy = real.cloneNode(false)
+      copy.style.display = ''
+      copy.style.setProperty('--n', String(count))
+      for (let i = 0; i < count; i++) copy.append(real.firstElementChild.cloneNode(false))
+      real.after(copy)
+      check(copy, count, `a tray of ${count}`)
+      copy.remove()
+    }
+    real.style.display = ''
+    return out
+  }, n)
+  for (const b of bad) fail(`${tag}: ember tray: ${b}`)
+}
+
 /** The faces document.fonts has loaded, as "Family style". */
 const loadedFaces = (page) =>
   page.evaluate(async () => {
@@ -335,6 +375,7 @@ async function screens(browser, size, fonts) {
   await worldReady(page)
   await page.waitForTimeout(1500)
   await hudApart(page, tag)
+  await stonesInRow(page, tag, 6)
   await look('world')
 
   if (fonts) {
@@ -388,6 +429,26 @@ async function screens(browser, size, fonts) {
     await look('restoring')
     await worldReady(page)
   }
+
+  // Every beacon lit, from the save edited (as the warm check does): each lit beacon adds a stone (rules/run.ts), so
+  // the ember tray holds its most, 6 + 3.
+  const most = await page.evaluate((k) => {
+    const f = JSON.parse(localStorage.getItem(k))
+    const beacons = [...window.__run.zone.cells.values()].filter((c) => c.landmark === 'beacon')
+    f.run.lit = beacons.map((c) => `${c.row},${c.col}`)
+    f.run.hero.maxEmber = 6 + beacons.length
+    f.run.hero.ember = f.run.hero.maxEmber - 2
+    localStorage.setItem(k, JSON.stringify(f))
+    return f.run.hero.maxEmber
+  }, SAVE_KEY)
+  if (most !== 9) fail(`${tag}: REACH1 should have three beacons (max ember ${most}, not 9)`)
+  await page.reload()
+  await press(page, 'Continue')
+  await worldReady(page)
+  await page.waitForTimeout(1500)
+  await hudApart(page, `${tag}, every beacon lit`)
+  await stonesInRow(page, `${tag}, every beacon lit`, most)
+  await look('world-lit')
 
   // The chapter ends, from the save edited.
   for (const [name, status] of [['end', 'hearth'], ['end-expired', 'expired']]) {

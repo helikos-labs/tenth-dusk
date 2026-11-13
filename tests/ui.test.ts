@@ -119,6 +119,26 @@ test('the name field shows a focus ring of at least 2 px and 3:1 on vellum', () 
   }
 })
 
+test('the ember tray keeps one row: 6 to 9 stones fit its 92 px column', () => {
+  const column = Number(/\.td-face \{[^}]*grid-template-columns:\s*(\d+)px 1fr \1px/.exec(css)?.[1])
+  const tray = /\.td-stones \{([^}]*)\}/.exec(css)?.[1] ?? ''
+  assert.ok(!/flex-wrap:\s*wrap/.test(tray), 'the tray does not wrap')
+  const m = /--stone:\s*min\((\d+)px, calc\((\d+)px \/ \(([\d.]+) \* var\(--n, 6\) - ([\d.]+)\)\)\)/.exec(tray)
+  assert.ok(m, `the stone size follows the count: ${tray}`)
+  const [most, room, k, less] = m.slice(1).map(Number)
+  const gap = Number(/gap:\s*calc\(([\d.]+) \* var\(--stone\)\)/.exec(tray)?.[1])
+  const side = Number(/padding:\s*\d+px (\d+)px/.exec(tray)?.[1])
+  assert.equal(room + 2 * side, column, 'the room inside the tray and its padding fill the column')
+  assert.ok(Math.abs(gap - (k - 1)) < 1e-9 && less === gap, 'the gap is the share of a stone the formula leaves for it')
+  for (let n = 6; n <= 9; n++) {
+    const w = Math.min(most, room / (k * n - less))
+    const width = n * w + (n - 1) * gap * w
+    assert.ok(width <= room + 1e-9, `${n} stones take ${width.toFixed(2)} px of ${room}`)
+    assert.ok(w >= 6, `${n} stones are ${w.toFixed(2)} px wide`)
+  }
+  assert.equal(Math.min(most, room / (k * 6 - less)), 10, 'six stones keep their full 10 px')
+})
+
 test('buttons take their face from their own class (font: inherit only at class weight)', () => {
   assert.ok(!/\.td-layer button\s*\{/.test(css), '.td-layer button outweighs .td-close and the like')
   assert.match(css, /\.td-layer :where\(button\) \{[^}]*font: inherit/)
