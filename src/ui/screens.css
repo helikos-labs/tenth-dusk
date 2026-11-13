@@ -558,7 +558,8 @@
   color: #b7a68a;
 }
 .td-gauge-value {
-  font-family: var(--td-fell);
+  /* Numbers that change in place: IM Fell has only old-style proportional digits (R19). */
+  font-family: var(--td-garamond);
   font-size: 19px;
   font-weight: 400;
   font-variant-numeric: lining-nums tabular-nums;
@@ -567,7 +568,7 @@
 }
 .td-gauge-value small {
   font-size: 14px;
-  color: #a39275;
+  color: #b8a888;
 }
 .td-groove {
   height: 10px;

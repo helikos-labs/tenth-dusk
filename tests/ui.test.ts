@@ -76,3 +76,10 @@ test('the dial sweep', () => {
   assert.equal(dialSweep(11, 10), 0)
   assert.equal(dialSweep(0, 10), 1)
 })
+
+test('the gauge values use lining tabular Garamond figures', () => {
+  const rule = /\.td-gauge-value \{([^}]*)\}/.exec(css)?.[1] ?? ''
+  assert.match(rule, /font-family:\s*var\(--td-garamond\)/)
+  assert.match(rule, /lining-nums/)
+  assert.match(rule, /tabular-nums/)
+})
