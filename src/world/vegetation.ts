@@ -14,7 +14,7 @@ import type { WorldCell } from './adapter.ts'
 import { SQRT3, WARP, WATER_LEVEL, fbm, fray, hash01, hexCenter, smoothstep, type Field, type Probe, type Rect } from './field.ts'
 import { flowersOf } from './flora.ts'
 import { onRim } from './layout.ts'
-import { castShadows, plantDepthMaterials, windPatch, type FogUniforms } from './materials.ts'
+import { castShadows, plantDepthMaterials, windPatch, type FogUniforms, type LitUniforms } from './materials.ts'
 import { LATTICE } from './terrainMesh.ts'
 
 /** Hex centres keep a clearing this wide for the hero and Landmarks. */
@@ -535,8 +535,11 @@ export class PlantMeshes {
   /** With the fog: the plants' own shadow depth materials, which hide unseen plants' shadows too. */
   private depth: ReturnType<typeof plantDepthMaterials> | null
 
-  /** With the fog's uniforms (materials.ts FogUniforms) the plants show the fog of war (`windPatch`). */
-  constructor(uniforms: { uTime: { value: number } } & Partial<FogUniforms>) {
+  /**
+   * With the fog's uniforms (materials.ts FogUniforms) the plants show the fog of war (`windPatch`), and with the lit
+   * beacons' too (LitUniforms) they warm near a lit beacon.
+   */
+  constructor(uniforms: { uTime: { value: number } } & Partial<FogUniforms & LitUniforms>) {
     this.depth = uniforms.uState ? plantDepthMaterials(uniforms as FogUniforms) : null
     const plant = (sway: number, key: string, opts: THREE.MeshStandardMaterialParameters = {}) => {
       const m = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.85, metalness: 0, ...opts })

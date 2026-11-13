@@ -3,7 +3,9 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import { PALETTE } from '../src/world/palette.ts'
 import { FLOWERS, HEATH_FLOWERS } from '../src/world/flora.ts'
-import { buildField } from '../src/world/field.ts'
+import { SQRT3, buildField, hexCenter } from '../src/world/field.ts'
+import { WARM_RADIUS, WARMTH_GLSL, litPositions, warmthAt } from '../src/world/warmth.ts'
+import { toAxial, unkey } from '../src/rules/hex.ts'
 import { FLOWER_SHARE, LEAFY_SHARE, SNAPPED_SHARE, broadleaf, conifer, crown, deadleaf, plantsFor, reed, stem } from '../src/world/vegetation.ts'
 import * as THREE from 'three'
 import { GRADE_GLSL, gradeRGB, installGrade } from '../src/world/grade.ts'
@@ -170,15 +172,16 @@ test('the computed-index check catches what it should', () => {
 test('no computed array indices in shaders', async () => {
   const materials = await import('../src/world/materials.ts')
   const grade = await import('../src/world/grade.ts')
+  const warmth = await import('../src/world/warmth.ts')
   const { makeMist } = await import('../src/world/mist.ts')
   const sources: [string, string][] = []
-  for (const [file, mod] of [['materials', materials], ['grade', grade]] as const)
+  for (const [file, mod] of [['materials', materials], ['grade', grade], ['warmth', warmth]] as const)
     for (const [k, v] of Object.entries(mod)) if (k.endsWith('_GLSL') && typeof v === 'string') sources.push([`${file}.${k}`, v])
   // The patched materials' shader text, as their onBeforeCompile writes it into three's chunks (only the include
   // lines stand in for three's own code).
   const chunks = ['common', 'beginnormal_vertex', 'begin_vertex', 'worldpos_vertex', 'color_fragment', 'normal_fragment_maps', 'emissivemap_fragment', 'opaque_fragment']
   const stub = chunks.map((c) => `#include <${c}>`).join('\n')
-  const u = { uTime: { value: 0 }, uState: { value: null } } as never
+  const u = { uTime: { value: 0 }, uState: { value: null }, uLit0: { value: null } } as never
   const patched = (name: string, mat: THREE.Material) => {
     const shader = { uniforms: {}, vertexShader: stub, fragmentShader: stub } as unknown as THREE.WebGLProgramParametersWithUniforms
     mat.onBeforeCompile(shader, null as never)
@@ -226,4 +229,87 @@ test('the Hush colour has one source', async () => {
   for (const f of ['src/scenes/WorldScene.tsx', 'src/scenes/models/landmarks.ts']) {
     assert.ok(!/['"]#14[0-9a-f]{4}['"]/i.test(readFileSync(f, 'utf8')), `${f} carries its own dusk literal`)
   }
+})
+
+// Warmth round lit beacons (§3.7). Offset "row,col" keys, as run.lit holds them; their cells are in the valley.
+const centreOf = (k: string) => {
+  const { q, r } = toAxial(unkey(k))
+  assert.ok(VALLEY[`${q},${r}`], `${k} is in the valley`)
+  return hexCenter(q, r)
+}
+const isFar = (v: THREE.Vector3) => v.x === 1e4 && v.y === 0 && v.z === 1e4
+const LIT = ['5,4', '10,7', '15,3', '18,9']
+
+test('no beacons, no warmth', () => {
+  const p = litPositions([], VALLEY)
+  assert.equal(p.length, 3)
+  for (const v of p) assert.ok(isFar(v), `${v.toArray()}`)
+})
+
+test('two lit beacons fill the first two slots', () => {
+  const p = litPositions(LIT.slice(0, 2), VALLEY)
+  for (let i = 0; i < 2; i++) {
+    const c = centreOf(LIT[i])
+    assert.ok(Math.abs(p[i].x - c.x) < 1e-6 && Math.abs(p[i].z - c.z) < 1e-6, `slot ${i} ${p[i].toArray()} against ${c.x},${c.z}`)
+  }
+  assert.ok(isFar(p[2]))
+})
+
+test('four lit keeps the first three, in order', () => {
+  const p = litPositions(LIT, VALLEY)
+  for (let i = 0; i < 3; i++) {
+    const c = centreOf(LIT[i])
+    assert.ok(Math.abs(p[i].x - c.x) < 1e-6 && Math.abs(p[i].z - c.z) < 1e-6, `slot ${i}`)
+  }
+})
+
+test('an unknown key leaves its slot far', () => {
+  const p = litPositions(['99,99', LIT[0]], VALLEY)
+  assert.ok(isFar(p[0]))
+  const c = centreOf(LIT[0])
+  assert.ok(Math.abs(p[1].x - c.x) < 1e-6 && Math.abs(p[1].z - c.z) < 1e-6)
+  assert.ok(isFar(p[2]))
+})
+
+test('warmth falls off over about 2.5 hexes', () => {
+  assert.equal(WARM_RADIUS, 2.5 * SQRT3)
+  const p = litPositions([LIT[0]], VALLEY)
+  const c = centreOf(LIT[0])
+  assert.equal(warmthAt(c, p), 1)
+  assert.ok(warmthAt({ x: c.x + 1.5 * SQRT3, z: c.z }, p) >= 0.5)
+  assert.equal(warmthAt({ x: c.x + 3 * SQRT3, z: c.z }, p), 0)
+  assert.equal(warmthAt(c, litPositions([], VALLEY)), 0)
+  // The nearest beacon wins (the maximum, not the sum).
+  const two = litPositions([LIT[0], LIT[0]], VALLEY)
+  assert.equal(warmthAt({ x: c.x + 1.5 * SQRT3, z: c.z }, two), warmthAt({ x: c.x + 1.5 * SQRT3, z: c.z }, p))
+})
+
+test('the warmth GLSL mirrors warmthAt, three beacons written out', () => {
+  assert.match(WARMTH_GLSL, /float td_warmth\(vec2 xz\)/)
+  for (const u of ['uLit0', 'uLit1', 'uLit2']) assert.match(WARMTH_GLSL, new RegExp(`uniform vec3 ${u};`))
+  assert.ok(WARMTH_GLSL.includes(WARM_RADIUS.toFixed(4)), 'the radius is WARM_RADIUS')
+  assert.ok(WARMTH_GLSL.includes('mix(vec3(1.0), vec3(1.08, 1.0, 0.9), w)'), 'the warm tint')
+  assert.ok(WARMTH_GLSL.includes('1.0 + 0.6 * w'), 'the restored saturation')
+})
+
+test('ground and plants warm only where seen (C7)', async () => {
+  const { makeTerrainMaterial, windPatch } = await import('../src/world/materials.ts')
+  const stub = ['common', 'color_fragment', 'normal_fragment_maps', 'emissivemap_fragment', 'opaque_fragment'].map((c) => `#include <${c}>`).join('\n')
+  const lit = { uLit0: { value: new THREE.Vector3() }, uLit1: { value: new THREE.Vector3() }, uLit2: { value: new THREE.Vector3() } }
+  const terrain = { uniforms: {}, vertexShader: '', fragmentShader: stub } as unknown as THREE.WebGLProgramParametersWithUniforms
+  makeTerrainMaterial(lit as never).onBeforeCompile(terrain, null as never)
+  for (const u of Object.keys(lit)) assert.ok(u in terrain.uniforms, `terrain has ${u}`)
+  const frag = terrain.fragmentShader
+  const unseen = frag.indexOf('td_unseen(rr_fog.w.x')
+  const warm = frag.indexOf('td_warm(gl_FragColor.rgb, td_warmth(vWPos.xz) * td_seen)')
+  assert.ok(unseen > 0 && warm > unseen, 'the ground warms after the unseen tint, by its seen share')
+  const plants = { uniforms: {}, vertexShader: stub, fragmentShader: stub } as unknown as THREE.WebGLProgramParametersWithUniforms
+  const mat = new THREE.MeshStandardMaterial()
+  windPatch(mat, { uTime: { value: 0 }, uState: { value: null }, ...lit } as never, 0.1, 'test')
+  mat.onBeforeCompile(plants, null as never)
+  for (const u of Object.keys(lit)) assert.ok(u in plants.uniforms, `plants have ${u}`)
+  const pf = plants.fragmentShader
+  const tint = pf.indexOf('td_tint(diffuseColor.rgb')
+  const pw = pf.indexOf('td_warm(diffuseColor.rgb, td_warmth(rr_wpos.xz) * td_seenShare(td_one(rr_fog)))')
+  assert.ok(tint > 0 && pw > tint, 'plants warm after their fog tint, by their seen share')
 })

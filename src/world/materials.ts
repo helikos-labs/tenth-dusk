@@ -15,6 +15,7 @@ import { toAxial } from '../rules/hex.ts'
 import { WATER_LEVEL, makeWarp, rimRay, type Bounds, type Rect } from './field.ts'
 import { PALETTE } from './palette.ts'
 import { PERF_GLSL } from '../testHooks.ts'
+import { WARMTH_GLSL } from './warmth.ts'
 
 /** Texels per hex in the state texture. */
 export const TEXELS = 3
@@ -549,10 +550,16 @@ export interface TerrainUniforms {
   uSun: { value: THREE.Vector3 }
   /** The zone's bounds without its wall ring (field.ts `bounds.inner`: min x, min z, max x, max z), for the walls' fog. */
   uInner: { value: THREE.Vector4 }
+  /** The first three lit beacons' world positions (warmth.ts `litPositions`; unused slots far away). */
+  uLit0: { value: THREE.Vector3 }
+  uLit1: { value: THREE.Vector3 }
+  uLit2: { value: THREE.Vector3 }
 }
 
 /** What the fog of war reads (`windPatch` for plants, mist.ts): the state texture, the province lookup and uInner. */
 export type FogUniforms = Pick<TerrainUniforms, 'uTime' | 'uState' | 'uStateSize' | 'uRect' | 'uRim' | 'uWarp' | 'uWarpBox' | 'uInner'>
+/** What the warmth round lit beacons reads (warmth.ts): the terrain and, with the fog, the plants (`windPatch`). */
+export type LitUniforms = Pick<TerrainUniforms, 'uLit0' | 'uLit1' | 'uLit2'>
 
 
 /** The reachable highlight (texel 2 b): its colour, rim width (world units) and glow, and the wash inside it. */
@@ -617,6 +624,7 @@ ${WARP_GLSL}
 ${FOG_TINT_GLSL}
 ${FOG_LOOKUP_GLSL}
 ${ASH_GLSL}
+${WARMTH_GLSL}
 vec4 rr_state(float slot, float texel) {
   if (slot < 0.0) return vec4(0.0);
   return texture2D(uState, vec2((slot * ${TEXELS}.0 + texel + 0.5) / uStateSize, 0.5));
@@ -721,11 +729,13 @@ if (rr_state(rr_prov.slot, 2.0).b > 0.5) {
         `#include <opaque_fragment>
 // The unseen share after lighting: flat fog, not shaded by the sun.
 gl_FragColor.rgb = mix(gl_FragColor.rgb, td_unseen(rr_fog.w.x > 0.0 ? td_mistNoise(vWPos.xz, uTime) : 0.0), rr_fog.w.x / td_sum(rr_fog));
+// Warmth round lit beacons (§3.7), on seen ground only (C7).
+gl_FragColor.rgb = td_warm(gl_FragColor.rgb, td_warmth(vWPos.xz) * td_seen);
 // The low haze, on seen ground only (C7).
 gl_FragColor.rgb = td_haze(gl_FragColor.rgb, vWPos, td_seen, td_cl);`,
       )
   }
-  mat.customProgramCacheKey = () => 'td-terrain-fog-4'
+  mat.customProgramCacheKey = () => 'td-terrain-fog-5'
   return mat
 }
 
@@ -857,22 +867,26 @@ void main() {
  * board. `sway` scales it (trees 0.07, grass and flowers more; 0 for none). Given the fog's uniforms too, a plant reads
  * texel 2 of the province at its instance's origin (through the warp, as the ground does): unseen or sunk (its ground
  * sunk to the fog floor), it scales to nothing; otherwise it takes the ground's treatment of its state (remembered and
- * wall desaturated). Its shadow needs `plantDepthMaterials`.
+ * wall desaturated). With the lit beacons' uniforms too, a seen plant warms near a lit beacon as the ground does
+ * (warmth.ts). Its shadow needs `plantDepthMaterials`.
  */
-export function windPatch(mat: THREE.Material, uniforms: { uTime: { value: number } } & Partial<FogUniforms>, sway: number, key: string) {
+export function windPatch(mat: THREE.Material, uniforms: { uTime: { value: number } } & Partial<FogUniforms & LitUniforms>, sway: number, key: string) {
   const fog = !!uniforms.uState
+  const lit = fog && !!uniforms.uLit0
   mat.onBeforeCompile = (shader) => {
     Object.assign(shader.uniforms, fog ? uniforms : { uTime: uniforms.uTime })
     shader.fragmentShader = shader.fragmentShader
       .replace(
         '#include <common>',
         `#include <common>\nuniform float uTime;\nvarying vec3 rr_wpos;\n${NOISE_GLSL}\n${CLOUD_GLSL}` +
-          (fog ? `\nuniform vec4 uInner;\nvarying vec4 rr_fog;\n${FOG_TINT_GLSL}` : ''),
+          (fog ? `\nuniform vec4 uInner;\nvarying vec4 rr_fog;\n${FOG_TINT_GLSL}` : '') +
+          (lit ? `\n${ASH_GLSL}\n${WARMTH_GLSL}` : ''),
       )
       .replace(
         '#include <color_fragment>',
         `#include <color_fragment>\ndiffuseColor.rgb *= 1.0 - rr_cloud(rr_wpos.xz, uTime);` +
-          (fog ? `\ndiffuseColor.rgb = td_tint(diffuseColor.rgb, td_one(rr_fog), rr_wpos.xz, 0.0);` : ''),
+          (fog ? `\ndiffuseColor.rgb = td_tint(diffuseColor.rgb, td_one(rr_fog), rr_wpos.xz, 0.0);` : '') +
+          (lit ? `\n// Warmth round lit beacons (§3.7), on seen plants only (C7).\ndiffuseColor.rgb = td_warm(diffuseColor.rgb, td_warmth(rr_wpos.xz) * td_seenShare(td_one(rr_fog)));` : ''),
       )
     shader.vertexShader = shader.vertexShader
       .replace(
@@ -911,7 +925,7 @@ export function windPatch(mat: THREE.Material, uniforms: { uTime: { value: numbe
 #endif`,
       )
   }
-  mat.customProgramCacheKey = () => `rr-wind2-${key}${fog ? '-fog2' : ''}`
+  mat.customProgramCacheKey = () => `rr-wind2-${key}${fog ? '-fog2' : ''}${lit ? '-lit' : ''}`
 }
 
 /**

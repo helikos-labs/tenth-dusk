@@ -47,6 +47,7 @@ import { copyModel, prepareNow, prepared, templateOf, ticksOf } from '../world/m
 import { ROAD, buildRoads } from '../world/roads.ts'
 import { hexIndex, writeCells } from '../world/terrainMesh.ts'
 import { SMALL_SCREEN, useWorld, useWorldClient } from '../world/useWorld.ts'
+import { litPositions } from '../world/warmth.ts'
 import type { WorldClient } from '../world/worldClient.ts'
 import ContextWatch from './ContextWatch.tsx'
 import { HERO_HEIGHT, dressHero, makeHero } from './models/hero.ts'
@@ -170,8 +171,10 @@ function Scene({ world, client, run, preview, onTap, onReady }: SceneProps) {
   const size = useThree((st) => st.size)
   const invalidate = useThree((st) => st.invalidate)
   const field = useMemo(() => buildField(world), [world])
-  const uniforms = useMemo(
-    () => ({
+  const uniforms = useMemo(() => {
+    // The lit beacons, for their warmth (warmth.ts): none lit yet, every slot far away.
+    const [lit0, lit1, lit2] = litPositions([], {})
+    return {
       uTime: { value: 0 },
       uState: { value: makeStateTexture(SLOTS) },
       uStateSize: { value: SLOTS * TEXELS },
@@ -184,9 +187,11 @@ function Scene({ world, client, run, preview, onTap, onReady }: SceneProps) {
       uWarpBox: { value: new THREE.Vector4(0, 0, 1, 1) },
       uInner: { value: new THREE.Vector4() },
       uBounds: { value: new THREE.Vector4() },
-    }),
-    [],
-  )
+      uLit0: { value: lit0 },
+      uLit1: { value: lit1 },
+      uLit2: { value: lit2 },
+    }
+  }, [])
   useLayoutEffect(() => {
     const { rect, rim } = boardShape(world, field.bounds)
     uniforms.uRect.value.copy(rect)
@@ -198,7 +203,8 @@ function Scene({ world, client, run, preview, onTap, onReady }: SceneProps) {
 
   // Per-hex state for the shaders: each hex's terrain and Landmark (texel 1), then its fog and whether the steps left
   // reach it (texel 2), rewritten whenever the run changes; nothing is rebuilt, but the shadows redraw (hidden ground
-  // and plants cast none). Only in-sight hexes are ever reachable (reach.ts), so no highlight falls on the unseen.
+  // and plants cast none). Only in-sight hexes are ever reachable (reach.ts), so no highlight falls on the unseen. The
+  // lit beacons' positions go with it, for the warmth round them (warmth.ts).
   const shadows = useRef(true)
   const slots = useMemo(() => hexIndex(world), [world])
   const walls = useMemo(() => new Set(Object.values(world).filter((c) => c.wall).map((c) => offKey(c))), [world])
@@ -206,9 +212,13 @@ function Scene({ world, client, run, preview, onTap, onReady }: SceneProps) {
   useLayoutEffect(() => writeCells(uniforms.uState.value, slots, world), [uniforms, slots, world])
   useLayoutEffect(() => {
     writeFog(uniforms.uState.value, slots, run.fog, walls, reach)
+    const [a, b, c] = litPositions(run.lit, world)
+    uniforms.uLit0.value.copy(a)
+    uniforms.uLit1.value.copy(b)
+    uniforms.uLit2.value.copy(c)
     shadows.current = true
     invalidate()
-  }, [uniforms, slots, walls, run.fog, reach, invalidate])
+  }, [uniforms, slots, walls, run.fog, run.lit, world, reach, invalidate])
 
   const { terrain, plants } = useWorld(client, uniforms, () => (shadows.current = true))
   // The roads take the fog too: their shared materials, cloned once per scene and patched (materials.ts fogPatch).

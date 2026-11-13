@@ -9,7 +9,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type * as THREE from 'three'
 import { TEST, hooks } from '../testHooks.ts'
 import type { WorldCell } from './adapter.ts'
-import { makeWarpTexture, warpBoxUniform, type FogUniforms } from './materials.ts'
+import { makeWarpTexture, warpBoxUniform, type FogUniforms, type LitUniforms } from './materials.ts'
 import { applyTerrain, type TerrainGeometry } from './terrainMesh.ts'
 import { PlantMeshes } from './vegetation.ts'
 import type { WorldUpdate } from './worldBuild.ts'
@@ -88,7 +88,7 @@ export interface World {
  */
 export function useWorld(
   client: WorldClient,
-  uniforms: { uTime: { value: number }; uWarp: { value: THREE.DataTexture }; uWarpBox: { value: THREE.Vector4 } } & Partial<FogUniforms>,
+  uniforms: { uTime: { value: number }; uWarp: { value: THREE.DataTexture }; uWarpBox: { value: THREE.Vector4 } } & Partial<FogUniforms & LitUniforms>,
   changed: () => void,
 ): World {
   const invalidate = useThree((st) => st.invalidate)
