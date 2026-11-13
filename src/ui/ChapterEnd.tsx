@@ -2,7 +2,7 @@
 // returns to the title.
 import type { RunState } from '../rules/run.ts'
 import type { GameAction } from './useGame.ts'
-import { DropCap, Ornament, Page } from './Page.tsx'
+import { Ornament, Page } from './Page.tsx'
 
 export default function ChapterEnd({ run, act }: { run: RunState; act: (a: GameAction) => void }) {
   const hearth = run.status === 'hearth'
@@ -14,14 +14,10 @@ export default function ChapterEnd({ run, act }: { run: RunState; act: (a: GameA
         </p>
         <Ornament />
         {hearth ? (
-          <p className="td-prose">
-            <DropCap text="The hearth takes the ember. It burns bright again." />
-          </p>
+          <p className="td-prose td-initial">The hearth takes the ember. It burns bright again.</p>
         ) : (
           <>
-            <p className="td-prose">
-              <DropCap text="The ember gutters out. The Hush takes the Reach." />
-            </p>
+            <p className="td-prose td-initial">The ember gutters out. The Hush takes the Reach.</p>
             <p className="td-prose td-quiet">Your journey goes on, marked by this loss.</p>
           </>
         )}

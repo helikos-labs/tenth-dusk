@@ -317,16 +317,18 @@
   font-style: italic;
   color: var(--td-ink-soft);
 }
-/* The drop cap: a two-span line, so the text still reads whole. */
-.td-prose .td-cap {
+/* The dropped initial, drawn by ::first-letter: the text stays one text, so a screen reader reads the first word whole
+   (a floated span of its own reads "T he"). */
+.td-prose.td-initial {
+  text-align: left;
+}
+.td-prose.td-initial::first-letter {
   float: left;
   margin: 4px 4px 0 0;
   font-family: var(--td-fell);
   font-size: 60px;
   line-height: 0.8;
-}
-.td-prose:has(.td-cap) {
-  text-align: left;
+  color: var(--td-rubric);
 }
 .td-page .td-seal {
   min-width: 210px;

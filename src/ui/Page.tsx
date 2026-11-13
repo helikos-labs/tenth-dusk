@@ -28,8 +28,9 @@ export function Page({ small, fit, children }: { small?: boolean; fit?: boolean;
 }
 
 /**
- * A heading or line whose first letter is a rubric drop cap; the accessible text stays the whole word. The letter is
- * also in data-cap, so a cap whose arm reaches over the next letters (T, F) can tuck them under it.
+ * A folio title whose first letter is a rubric initial, inline, so the accessible text stays the whole word. The letter
+ * is also in data-cap, so a cap whose arm reaches over the next letters (T, F) can tuck them under it. (A paragraph's
+ * dropped initial is .td-initial, drawn by ::first-letter: a floated span would split the word for a screen reader.)
  */
 export function DropCap({ text }: { text: string }) {
   const first = Array.from(text)[0] ?? ''
