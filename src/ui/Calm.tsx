@@ -1,18 +1,20 @@
-// A calm full screen for when the world can't be shown (R25): a guttered flame, what happened, and "Return to title".
-// The save is never touched here, so the title offers to continue the journey.
+// A calm full screen for when the world can't be shown (R25): a small printed page with what happened and "Return to
+// title". The save is never touched here, so the title offers to continue the journey.
+import { Ornament, Page } from './Page.tsx'
+
 export default function Calm({ heading, text, onReturn }: { heading: string; text: string; onReturn: () => void }) {
   return (
-    <main className="td-layer td-screen" role="alert">
-      <div className="td-title-mark td-fade">
-        <div className="td-flame td-out" aria-hidden="true" />
-      </div>
-      <div className="td-screen-body td-fade-late">
+    <main className="td-layer td-book td-book-notice" role="alert">
+      <Page small>
         <h1 className="td-heading">{heading}</h1>
+        <Ornament />
         <p className="td-prose">{text}</p>
-        <button type="button" className="td-primary" onClick={onReturn}>
-          Return to title
-        </button>
-      </div>
+        <div className="td-menu">
+          <button type="button" className="td-seal" onClick={onReturn}>
+            <span>Return to title</span>
+          </button>
+        </div>
+      </Page>
     </main>
   )
 }

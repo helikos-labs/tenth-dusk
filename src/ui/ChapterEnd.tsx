@@ -2,28 +2,33 @@
 // returns to the title.
 import type { RunState } from '../rules/run.ts'
 import type { GameAction } from './useGame.ts'
+import { DropCap, Ornament, Page } from './Page.tsx'
 
 export default function ChapterEnd({ run, act }: { run: RunState; act: (a: GameAction) => void }) {
   const hearth = run.status === 'hearth'
   return (
-    <main className="td-layer td-screen td-over-world">
-      <div className="td-title-mark td-fade-late">
-        <div className={hearth ? 'td-flame' : 'td-flame td-out'} aria-hidden="true" />
-      </div>
-      <div className="td-screen-body td-fade-late">
-        <p className="td-eyebrow">Chapter 1 · The Reach Road</p>
+    <main className="td-layer td-book td-over-world">
+      <Page>
+        <p className="td-over">Chapter 1 · The Reach Road</p>
+        <Ornament />
         {hearth ? (
-          <p className="td-prose">The hearth takes the ember. It burns bright again.</p>
+          <p className="td-prose">
+            <DropCap text="The hearth takes the ember. It burns bright again." />
+          </p>
         ) : (
           <>
-            <p className="td-prose">The ember gutters out. The Hush takes the Reach.</p>
+            <p className="td-prose">
+              <DropCap text="The ember gutters out. The Hush takes the Reach." />
+            </p>
             <p className="td-prose td-quiet">Your journey goes on, marked by this loss.</p>
           </>
         )}
-        <button type="button" className="td-primary" onClick={() => act({ t: 'continue' })}>
-          Continue
-        </button>
-      </div>
+        <div className="td-menu">
+          <button type="button" className="td-seal" onClick={() => act({ t: 'continue' })}>
+            <span>Continue</span>
+          </button>
+        </div>
+      </Page>
     </main>
   )
 }

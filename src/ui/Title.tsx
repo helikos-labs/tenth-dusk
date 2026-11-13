@@ -1,23 +1,28 @@
-// The title (§16): the game's name over a small ember; "Continue" when there is a save, and "Start a new journey".
+// The title (§16): a printed title page over the dimmed world: "The First Book", the name, an ornament, an italic line,
+// a wax-seal "Start a new journey" and, when there is a save, an italic "Continue".
 import type { GameAction } from './useGame.ts'
+import { Ornament, Page } from './Page.tsx'
 
 export default function Title({ canContinue, act }: { canContinue: boolean; act: (a: GameAction) => void }) {
   return (
-    <main className="td-layer td-screen">
-      <div className="td-title-mark td-fade">
-        <div className="td-flame" aria-hidden="true" />
+    <main className="td-layer td-book">
+      <Page>
+        <p className="td-over">The First Book</p>
         <h1 className="td-title">Tenth Dusk</h1>
-      </div>
-      <div className="td-screen-body td-fade-late">
-        {canContinue && (
-          <button type="button" className="td-primary" onClick={() => act({ t: 'continue' })}>
-            Continue
+        <Ornament />
+        <p className="td-tag">Ten dusks remain before the last ember dies. Carry the lantern through the Reach.</p>
+        <div className="td-menu">
+          <button type="button" className="td-seal" onClick={() => act({ t: 'new' })}>
+            <span>Start a new journey</span>
           </button>
-        )}
-        <button type="button" className={canContinue ? 'td-secondary' : 'td-primary'} onClick={() => act({ t: 'new' })}>
-          Start a new journey
-        </button>
-      </div>
+          {canContinue && (
+            <button type="button" className="td-alt" onClick={() => act({ t: 'continue' })}>
+              Continue
+            </button>
+          )}
+        </div>
+        <p className="td-imprint">Helikos · MMXXVI</p>
+      </Page>
     </main>
   )
 }

@@ -88,7 +88,7 @@ export default function App() {
       {screen === 'end' && run && <ChapterEnd run={run} act={act} />}
       {showWorld && scene.restoring && (
         <div className="td-layer td-restoring" role="status">
-          <span>Restoring the world…</span>
+          <span className="td-vellum">Restoring the world…</span>
         </div>
       )}
       {PERF && <PerfOverlay startAt={worldTimes?.start ?? null} readyAt={worldTimes?.ready ?? null} />}
