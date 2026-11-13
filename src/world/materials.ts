@@ -385,10 +385,12 @@ const glsl = (c: THREE.Color) => `vec3(${c.r.toFixed(4)}, ${c.g.toFixed(4)}, ${c
  *   wall: remembered, then toward UNSEEN in step with how far it lies into the ring (from the zone's bounds, `uInner`),
  *   reaching WALL_DARK WALL_FADE world units out (the ring is 4 hexes deep: 6 across its rows).
  */
+/** The Hush's colour: the fog, the sky and the world's dusk everywhere (one source). */
+export const DUSK = '#14171c'
 export const FOG_LOOK = {
   UNSEEN: new THREE.Color('#10151d'),
   FLOOR: new THREE.Color('#3a4350'),
-  DUSK: new THREE.Color('#141a24'),
+  DUSK: new THREE.Color(DUSK),
   MIST: new THREE.Color('#2b3542'),
   MIST_NOISE: 0.45,
   WALL_DARK: 0.8,

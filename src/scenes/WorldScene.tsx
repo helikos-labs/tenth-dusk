@@ -28,6 +28,7 @@ import { writeFog } from '../world/fog.ts'
 import { dryInside, placeInside } from '../world/layout.ts'
 import {
   DEPTH,
+  DUSK,
   SLOTS,
   TEXELS,
   boardShape,
@@ -73,8 +74,6 @@ export interface WorldSceneProps {
   onRestored?: () => void
 }
 
-/** The Hush beyond the walls: the fog's colour and the sky's. */
-export const DUSK = '#14171c'
 /**
  * The follow camera (§4): it looks down at `pitch` degrees with a vertical field of view of `fov`, at the hero kept
  * `heroAt` of the way down the screen, easing after them with a half-life of `halfLife` seconds. At the default zoom
@@ -83,7 +82,7 @@ export const DUSK = '#14171c'
  */
 const CAMERA = { pitch: 60, fov: 35, heroAt: 0.62, halfLife: 0.25, hexPx: 50, across: 9, zoom: [0.7, 2] as const }
 /** Fog from this share of the camera's distance to the hero to this share (none nearer, all beyond). */
-const FOG = { near: 1.2, far: 2.2 }
+const FOG = { near: 0.9, far: 1.8 }
 /** The low warm sun: the direction it shines from, its colour and strength. */
 const SUN = new THREE.Vector3(-9, 12, 5)
 const SUN_COLOR = 0xd9c6b0
@@ -641,7 +640,7 @@ function Sky() {
   const scene = useThree((st) => st.scene)
   useLayoutEffect(() => {
     scene.background = new THREE.Color(DUSK)
-    scene.fog = new THREE.Fog(DUSK, 30, 70)
+    scene.fog = new THREE.Fog(DUSK, FOG.near, FOG.far) // shares of the camera distance; `follow` scales them each frame
   }, [scene])
   return null
 }

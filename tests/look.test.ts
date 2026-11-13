@@ -149,3 +149,12 @@ test('grade keeps the blacks, drains saturation, leaves grey near grey', () => {
   const grey = gradeRGB([0.5, 0.5, 0.5])
   for (const v of grey) assert.ok(Math.abs(v - 0.5) < 0.05, `grey ${grey}`)
 })
+
+test('the Hush colour has one source', async () => {
+  const { readFileSync } = await import('node:fs')
+  const { DUSK, FOG_LOOK } = await import('../src/world/materials.ts')
+  assert.equal(FOG_LOOK.DUSK.getHexString(), new THREE.Color(DUSK).getHexString())
+  for (const f of ['src/scenes/WorldScene.tsx', 'src/scenes/models/landmarks.ts']) {
+    assert.ok(!/['"]#14[0-9a-f]{4}['"]/i.test(readFileSync(f, 'utf8')), `${f} carries its own dusk literal`)
+  }
+})
