@@ -8,7 +8,6 @@
   --td-faint: #7d776f;
   --td-ember: #ff9a4a;
   --td-ember-deep: #e5702c;
-  --td-glass-edge: rgba(255, 255, 255, 0.1);
   --td-tile: rgba(255, 255, 255, 0.035);
   --td-night: #0b0e14;
   --td-serif: var(--td-fell);
@@ -59,23 +58,17 @@
   color: inherit;
 }
 
-/* Labels: small spaced capitals. */
+/* Labels on the dark plates: small Fell capitals. */
 .td-label {
-  font-size: 12px;
-  font-weight: 500;
-  letter-spacing: 0.16em;
-  text-transform: uppercase;
+  font-family: var(--td-fell-sc);
+  font-size: 14px;
+  font-weight: 400;
+  letter-spacing: 0.04em;
   color: var(--td-dim);
 }
 .td-serif {
   font-family: var(--td-serif);
   font-weight: 400;
-}
-
-.td-glass {
-  /* Geometry only; the face is .td-iron or .td-vellum. */
-  border: 1px solid var(--td-glass-edge);
-  border-radius: 18px;
 }
 
 /* Vellum: a page of paper. */
@@ -121,6 +114,8 @@
   align-items: center;
   justify-content: center;
   min-height: 62px;
+  min-width: 168px;
+  padding: 0 18px;
   border: 0;
   background: none;
   cursor: pointer;
@@ -129,7 +124,7 @@
   content: '';
   position: absolute;
   inset: 0;
-  background: radial-gradient(circle at 38% 32%, #c4473a 0%, #962a20 40%, #6c1a14 75%, #4a100c 100%);
+  background: radial-gradient(circle at 38% 32%, #a63a2f 0%, #8a2a20 40%, #6c1a14 75%, #4a100c 100%);
   border-radius: 47% 53% 49% 51% / 55% 45% 55% 45%;
   box-shadow: inset 0 2px 3px rgba(255, 190, 170, 0.35), inset 0 -3px 5px rgba(0, 0, 0, 0.45), 0 3px 6px rgba(0, 0, 0, 0.5);
 }
@@ -137,7 +132,7 @@
   position: relative;
   font-family: var(--td-fell-sc);
   font-size: 17px;
-  color: #f4ddc8;
+  color: #fbeedd;
   text-shadow: 0 1px 0 rgba(60, 10, 5, 0.9);
 }
 
@@ -174,23 +169,14 @@
 .td-primary:focus-visible,
 .td-secondary:focus-visible,
 .td-tool:focus-visible,
-.td-option:focus-visible,
+.td-entry:focus-visible,
 .td-tab:focus-visible,
 .td-close:focus-visible {
   outline: 2px solid var(--td-ember);
   outline-offset: 2px;
 }
-
-.td-close {
-  width: 44px;
-  height: 44px;
-  border-radius: 50%;
-  border: 1px solid var(--td-glass-edge);
-  background: rgba(255, 255, 255, 0.05);
-  display: grid;
-  place-items: center;
-  cursor: pointer;
-  flex: none;
+.td-folio :focus-visible {
+  outline-color: var(--td-rubric);
 }
 
 /* Full screens: title, naming, intro, chapter end. */
@@ -657,131 +643,197 @@
   height: 26px;
 }
 
-/* Camp sheet */
-.td-sheet-back {
-  display: flex;
-  flex-direction: column;
-  justify-content: space-between;
-  align-items: stretch;
-  padding: calc(var(--td-top) + 16px) calc(var(--td-right) + 12px) calc(var(--td-bottom) + 12px) calc(var(--td-left) + 12px);
-  background: linear-gradient(180deg, rgba(8, 10, 14, 0.2) 0%, rgba(8, 10, 14, 0.55) 45%, rgba(8, 10, 14, 0.85) 100%);
-}
-.td-sheet {
-  width: 100%;
-  max-width: 480px;
-  margin: 0 auto;
-  padding: 18px 16px 16px;
-  border-radius: 24px;
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-.td-sheet-head {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 10px;
-}
-.td-corner {
-  display: flex;
-  justify-content: flex-end;
-}
-.td-sheet-title {
-  margin: 0;
-  font-family: var(--td-serif);
-  font-weight: 600;
-  font-size: 28px;
-  line-height: 1;
-  white-space: nowrap;
-}
-.td-options {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 10px;
-}
-.td-option {
-  text-align: left;
-  min-height: 84px;
-  padding: 12px 12px;
-  border-radius: 14px;
-  border: 1px solid rgba(255, 255, 255, 0.13);
-  background: var(--td-tile);
-  display: flex;
-  flex-direction: column;
-  justify-content: flex-start;
-  gap: 5px;
-  cursor: pointer;
-}
-.td-option[aria-pressed='true'] {
-  border-color: var(--td-ember);
-  background: rgba(255, 154, 74, 0.09);
-  box-shadow: inset 0 0 22px rgba(255, 154, 74, 0.08);
-}
-.td-option:disabled {
-  opacity: 0.45;
-  cursor: default;
-}
-.td-option-name {
-  font-size: 16px;
-  font-weight: 600;
-  letter-spacing: 0.05em;
-  text-transform: uppercase;
-}
-.td-option-text {
-  font-size: 15px;
-  color: var(--td-dim);
-  line-height: 1.25;
-}
-.td-gain {
-  color: var(--td-ember);
-}
-
-/* Pack */
+/* The camp and pack folios: a vellum page sliding up under an iron bar (ART-DIRECTION §4.3). */
+.td-sheet-back,
 .td-pack {
   display: flex;
   flex-direction: column;
-  justify-content: space-between;
-  gap: 12px;
-  padding: calc(var(--td-top) + 18px) calc(var(--td-right) + 12px) calc(var(--td-bottom) + 12px) calc(var(--td-left) + 12px);
-  background: linear-gradient(180deg, rgba(8, 10, 14, 0.92) 0%, rgba(8, 10, 14, 0.45) 30%, rgba(8, 10, 14, 0.45) 45%, rgba(8, 10, 14, 0.9) 70%);
+  justify-content: flex-end;
+  padding: calc(var(--td-top) + 16px) calc(var(--td-right) + 8px) 0 calc(var(--td-left) + 8px);
+  background: rgba(6, 5, 4, 0.55);
   overflow-y: auto;
 }
-.td-pack-head {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 0 6px;
-}
-.td-hero-name {
-  margin: 2px 0 0;
-  font-family: var(--td-serif);
-  font-weight: 600;
-  font-size: 46px;
-  line-height: 1;
-  overflow-wrap: anywhere;
-}
-.td-vitals {
-  display: flex;
-  gap: 16px;
-  margin-top: 8px;
-  font-size: 15px;
-  color: var(--td-dim);
-}
-.td-vitals b {
-  color: var(--td-light);
-  font-weight: 600;
-}
-.td-pack-panel {
+.td-folio {
+  position: relative;
   width: 100%;
   max-width: 480px;
-  margin: 0 auto;
-  padding: 14px;
-  border-radius: 24px;
+  margin: 10px auto 0;
+  padding: 26px 26px calc(var(--td-bottom) + 20px);
+  border-radius: 4px 4px 0 0;
+  box-shadow: 0 -6px 24px rgba(0, 0, 0, 0.6), inset 0 0 0 1px rgba(60, 40, 20, 0.3), inset 0 0 30px rgba(90, 60, 25, 0.4);
+  animation: td-folio-up 0.22s ease-out both;
+}
+.td-folio::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: -10px;
+  height: 14px;
+  border-radius: 3px;
+  background: var(--td-iron);
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.6);
+}
+@keyframes td-folio-up {
+  from {
+    transform: translateY(40px);
+    opacity: 0;
+  }
+  to {
+    transform: none;
+    opacity: 1;
+  }
+}
+.td-folio-title {
+  margin: 0;
+  font-family: var(--td-fell);
+  font-weight: 400;
+  font-size: 30px;
+  line-height: 1;
+  color: var(--td-ink);
+  overflow-wrap: anywhere;
+}
+.td-cap {
+  font-size: 46px;
+  line-height: 0.8;
+  margin-right: 1px;
+  color: var(--td-rubric);
+}
+.td-folio-sub {
+  margin: 6px 0 0;
+  font-family: var(--td-garamond);
+  font-style: italic;
+  font-size: 16px;
+  color: var(--td-ink-soft);
+}
+.td-folio-rule {
+  display: flex;
+  justify-content: flex-end;
+  align-items: flex-end;
+  min-height: 1px;
+  margin: 14px 0 10px;
+  background: linear-gradient(90deg, transparent, rgba(90, 40, 20, 0.55) 10%, rgba(90, 40, 20, 0.55) 90%, transparent) bottom / 100% 1px no-repeat;
+}
+.td-folio-count {
+  padding-bottom: 4px;
+  font-family: var(--td-garamond);
+  font-size: 15px;
+  font-variant-numeric: lining-nums tabular-nums;
+  color: var(--td-ink-soft);
+}
+.td-entries {
   display: flex;
   flex-direction: column;
-  gap: 12px;
 }
+.td-entry {
+  display: grid;
+  grid-template-columns: 26px 1fr auto;
+  gap: 10px;
+  align-items: start;
+  width: 100%;
+  min-height: 48px;
+  padding: 10px 2px;
+  text-align: left;
+  color: var(--td-ink);
+  background: none;
+  border: 0;
+  border-bottom: 1px solid rgba(90, 60, 30, 0.22);
+  cursor: pointer;
+}
+.td-box {
+  position: relative;
+  width: 18px;
+  height: 18px;
+  margin-top: 3px;
+  border: 1.5px solid var(--td-ink-soft);
+  border-radius: 2px;
+}
+.td-entry[aria-pressed='true'] .td-box::after {
+  content: '';
+  position: absolute;
+  left: 2px;
+  top: -6px;
+  width: 14px;
+  height: 20px;
+  border-right: 3px solid var(--td-rubric);
+  border-bottom: 3px solid var(--td-rubric);
+  transform: rotate(40deg);
+  border-radius: 1px;
+}
+.td-entry-body {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.td-entry-name {
+  font-family: var(--td-fell);
+  font-size: 19px;
+  line-height: 1.1;
+}
+.td-entry-text {
+  font-family: var(--td-garamond);
+  font-size: 15px;
+  color: var(--td-ink-soft);
+}
+.td-gain {
+  margin-top: 2px;
+  font-family: var(--td-fell);
+  font-size: 17px;
+  white-space: nowrap;
+  color: var(--td-rubric);
+}
+/* Not yet offered: faded italic (the contrast stays above 4.5:1, so the fade is the italic and the dashed box). */
+.td-entry:disabled:not([aria-pressed='true']) .td-entry-name,
+.td-entry:disabled:not([aria-pressed='true']) .td-entry-text {
+  font-style: italic;
+  color: var(--td-ink-soft);
+}
+.td-entry:disabled .td-box {
+  border-style: dashed;
+}
+.td-entry:disabled {
+  cursor: default;
+}
+.td-entry:disabled .td-box,
+.td-entry:disabled .td-gain {
+  opacity: 0.7;
+}
+.td-note {
+  margin: 8px 0 0;
+  font-family: var(--td-garamond);
+  font-style: italic;
+  font-size: 14px;
+  color: var(--td-ink-soft);
+}
+.td-seal-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 18px;
+}
+.td-seal:disabled::before {
+  filter: saturate(0.4) brightness(0.8);
+}
+.td-seal:disabled {
+  cursor: default;
+}
+.td-close {
+  min-height: 44px;
+  padding: 0 4px;
+  background: none;
+  border: 0;
+  font-family: var(--td-fell);
+  font-style: italic;
+  font-size: 17px;
+  color: var(--td-ink-soft);
+  text-decoration: underline;
+  text-decoration-color: rgba(90, 60, 30, 0.4);
+  text-underline-offset: 4px;
+  cursor: pointer;
+}
+
+/* Pack: the same folio; the slots are inked frames. */
 .td-tabs {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
@@ -789,39 +841,34 @@
 }
 .td-tab {
   min-height: 44px;
-  border-radius: 12px;
-  border: 1px solid rgba(255, 255, 255, 0.14);
-  background: rgba(255, 255, 255, 0.03);
-  font-size: 15px;
-  font-weight: 600;
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
-  color: var(--td-dim) !important;
+  background: none;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  font-family: var(--td-fell-sc);
+  font-size: 17px;
+  color: var(--td-ink) !important;
   cursor: pointer;
 }
 .td-tab[aria-selected='true'] {
-  background: var(--td-ember);
-  border-color: var(--td-ember);
-  color: #1a0f07 !important;
+  border-bottom-color: var(--td-rubric);
+  color: var(--td-rubric) !important;
 }
 .td-tab:disabled {
-  opacity: 0.4;
+  font-family: var(--td-fell);
+  font-style: italic;
   cursor: default;
+  color: var(--td-ink-soft) !important;
 }
 .td-tab small {
-  font-size: 12px;
-  letter-spacing: 0.06em;
   margin-left: 4px;
-}
-.td-note {
-  margin: -2px 0 0;
-  text-align: right;
-  font-size: 13px;
-  color: var(--td-faint);
+  font-family: var(--td-garamond);
+  font-size: 14px;
+  font-variant-numeric: lining-nums tabular-nums;
 }
 .td-slots {
   display: grid;
   gap: 8px;
+  margin-top: 12px;
 }
 .td-slots.td-gear {
   grid-template-columns: repeat(3, 1fr);
@@ -833,9 +880,9 @@
   position: relative;
   min-height: 86px;
   padding: 9px 10px;
-  border-radius: 14px;
-  border: 1px solid rgba(255, 255, 255, 0.13);
-  background: var(--td-tile);
+  border: 1.5px solid var(--td-ink-soft);
+  border-radius: 3px;
+  box-shadow: inset 0 0 0 3px rgba(90, 60, 30, 0.1);
   display: flex;
   flex-direction: column;
   justify-content: space-between;
@@ -847,31 +894,37 @@
 }
 .td-slot.td-empty {
   border-style: dashed;
-  border-color: rgba(255, 255, 255, 0.2);
-  background: transparent;
+  box-shadow: none;
+}
+.td-slot-label {
+  font-family: var(--td-fell-sc);
+  font-size: 14px;
+  color: var(--td-ink-soft);
 }
 .td-slot-name {
-  font-size: 15px;
-  font-weight: 500;
+  font-family: var(--td-fell);
+  font-size: 16px;
   line-height: 1.15;
+  color: var(--td-ink);
 }
-.td-empty .td-label,
 .td-empty .td-slot-name {
-  color: var(--td-faint);
+  font-style: italic;
+  color: var(--td-ink-soft);
 }
 .td-tier {
   align-self: flex-end;
-  font-family: var(--td-serif);
-  font-weight: 600;
+  font-family: var(--td-fell);
   font-size: 20px;
   line-height: 1;
-  color: var(--td-ember);
+  color: var(--td-rubric);
 }
 .td-count {
   align-self: flex-end;
-  font-size: 15px;
-  font-weight: 600;
-  color: var(--td-ember);
+  /* A number that changes in place: lining tabular Garamond (R19). */
+  font-family: var(--td-garamond);
+  font-size: 16px;
+  font-variant-numeric: lining-nums tabular-nums;
+  color: var(--td-rubric);
 }
 
 /* "Restoring the world…" while a lost WebGL context comes back (App.tsx, R25). */

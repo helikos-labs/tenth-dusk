@@ -22,20 +22,17 @@ const nameOf = (id: string) => NAMES[id] ?? id.charAt(0).toUpperCase() + id.slic
 export default function Pack({ run, act }: { run: RunState; act: (a: GameAction) => void }) {
   const [tab, setTab] = useState<'gear' | 'satchel'>('gear')
   const { hero } = run
+  const initial = Array.from(hero.name)[0] ?? ''
+  const rest = hero.name.slice(initial.length)
   return (
     <div className="td-layer td-pack">
-      <header className="td-pack-head td-fade">
-        <div>
-          <div className="td-label">The Lampwright</div>
-          <h2 className="td-hero-name">{hero.name}</h2>
-        </div>
-        <button type="button" className="td-close" aria-label="Close" onClick={() => act({ t: 'closePack' })}>
-          <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true">
-            <path d="M3 3l10 10M13 3L3 13" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
-          </svg>
-        </button>
-      </header>
-      <section className="td-pack-panel td-iron td-glass td-fade">
+      <section className="td-folio td-vellum" aria-labelledby="td-pack-title">
+        <h2 id="td-pack-title" className="td-folio-title">
+          <span className="td-cap">{initial}</span>
+          <span>{rest}</span>
+        </h2>
+        <p className="td-folio-sub">The Lampwright</p>
+        <div className="td-folio-rule" />
         <div className="td-tabs" role="tablist">
           <button type="button" role="tab" className="td-tab" aria-selected={tab === 'gear'} onClick={() => setTab('gear')}>
             Gear
@@ -57,7 +54,7 @@ export default function Pack({ run, act }: { run: RunState; act: (a: GameAction)
               const g = hero.gear[slot]
               return (
                 <div key={slot} className={g ? 'td-slot' : 'td-slot td-empty'}>
-                  <span className="td-label">{label}</span>
+                  <span className="td-slot-label">{label}</span>
                   <span className="td-slot-name">{g ? nameOf(g.id) : '—'}</span>
                   {g && <span className="td-tier">{TIER[g.tier]}</span>}
                 </div>
@@ -77,6 +74,11 @@ export default function Pack({ run, act }: { run: RunState; act: (a: GameAction)
             })}
           </div>
         )}
+        <div className="td-seal-row">
+          <button type="button" className="td-close" aria-label="Close" onClick={() => act({ t: 'closePack' })}>
+            Close
+          </button>
+        </div>
       </section>
     </div>
   )

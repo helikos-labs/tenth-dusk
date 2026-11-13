@@ -83,3 +83,18 @@ test('the gauge values use lining tabular Garamond figures', () => {
   assert.match(rule, /lining-nums/)
   assert.match(rule, /tabular-nums/)
 })
+
+test('the wax seal label reads on the seal\'s lightest stop (C5)', () => {
+  const face = /\.td-seal::before \{([^}]*)\}/.exec(css)?.[1] ?? ''
+  const stops = [...face.matchAll(/radial-gradient\([^,]*,\s*(#[0-9a-fA-F]{6})/g)].map((m) => m[1])
+  assert.equal(stops.length, 1, 'the seal face is one radial gradient starting at its lightest stop')
+  const label = /\.td-seal > \* \{[^}]*?color:\s*(#[0-9a-fA-F]{6})/.exec(css)?.[1]
+  assert.ok(label, 'the seal label has a hex colour')
+  const c = contrast(label, stops[0])
+  assert.ok(c >= 4.5, `seal label on its lightest stop is ${c.toFixed(2)}`)
+})
+
+test('the retired glass and 500-weight label styles are gone', () => {
+  assert.ok(!css.includes('.td-glass {'))
+  assert.ok(!/\.td-label \{[^}]*font-weight:\s*[56]00/.test(css))
+})
