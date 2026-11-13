@@ -648,7 +648,6 @@
 .td-pack {
   display: flex;
   flex-direction: column;
-  justify-content: flex-end;
   padding: calc(var(--td-top) + 16px) calc(var(--td-right) + 8px) 0 calc(var(--td-left) + 8px);
   background: rgba(6, 5, 4, 0.55);
   overflow-y: auto;
@@ -657,7 +656,7 @@
   position: relative;
   width: 100%;
   max-width: 480px;
-  margin: 10px auto 0;
+  margin: auto auto 0;
   padding: 26px 26px calc(var(--td-bottom) + 20px);
   border-radius: 4px 4px 0 0;
   box-shadow: 0 -6px 24px rgba(0, 0, 0, 0.6), inset 0 0 0 1px rgba(60, 40, 20, 0.3), inset 0 0 30px rgba(90, 60, 25, 0.4);
@@ -777,8 +776,10 @@
 }
 .td-gain {
   margin-top: 2px;
-  font-family: var(--td-fell);
+  /* Figures in lining Garamond (R22): Fell's old-style digits misread ("+ıo"). */
+  font-family: var(--td-garamond);
   font-size: 17px;
+  font-variant-numeric: lining-nums tabular-nums;
   white-space: nowrap;
   color: var(--td-rubric);
 }
@@ -794,9 +795,12 @@
 .td-entry:disabled {
   cursor: default;
 }
-.td-entry:disabled .td-box,
-.td-entry:disabled .td-gain {
+.td-entry:disabled .td-box {
   opacity: 0.7;
+}
+.td-entry:disabled .td-gain {
+  font-style: italic;
+  color: var(--td-ink-soft);
 }
 .td-note {
   margin: 8px 0 0;

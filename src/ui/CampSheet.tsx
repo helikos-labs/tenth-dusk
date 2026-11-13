@@ -24,7 +24,7 @@ export default function CampSheet({ run, act }: { run: RunState; act: (a: GameAc
           <span className="td-cap">{TITLE.charAt(0)}</span>
           <span>{TITLE.slice(1)}</span>
         </h2>
-        <p className="td-folio-sub">The light goes. Choose one thing to do before you sleep.</p>
+        <p className="td-folio-sub">The light goes. Choose what to do before you sleep.</p>
         <div className="td-folio-rule">
           <span className="td-folio-count">
             Choose {picks} · {chosen.length} / {picks}
@@ -40,7 +40,7 @@ export default function CampSheet({ run, act }: { run: RunState; act: (a: GameAc
                   <span className="td-entry-name">{o.name}</span>
                   <span className="td-entry-text">{o.text.trim()}</span>
                 </span>
-                <span className="td-gain">{o.gain}</span>
+                {o.gain && <span className="td-gain">{o.gain}</span>}
               </button>
             )
           })}

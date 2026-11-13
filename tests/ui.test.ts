@@ -98,3 +98,12 @@ test('the retired glass and 500-weight label styles are gone', () => {
   assert.ok(!css.includes('.td-glass {'))
   assert.ok(!/\.td-label \{[^}]*font-weight:\s*[56]00/.test(css))
 })
+
+test('the disabled camp gain keeps 4.5:1 on vellum', () => {
+  const rule = /\.td-entry:disabled \.td-gain \{([^}]*)\}/.exec(css)?.[1] ?? ''
+  assert.ok(!/opacity/.test(rule), 'no opacity on the disabled gain')
+  const colour = /color:\s*var\((--td-[a-z-]+)\)/.exec(rule)?.[1]
+  assert.ok(colour, 'the disabled gain names a token colour')
+  const c = contrast(token(colour), token('--td-vellum-lo'))
+  assert.ok(c >= 4.5, `disabled gain on vellum-lo is ${c.toFixed(2)}`)
+})
